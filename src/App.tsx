@@ -132,6 +132,7 @@ function App() {
   const [workspaceReady, setWorkspaceReady] = useState(!supabase);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState("");
+  const [noteSaveErrors, setNoteSaveErrors] = useState<Record<string, string>>({});
   const [authError, setAuthError] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
@@ -315,7 +316,7 @@ function App() {
       const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        if (!commandPaletteOpen) searchInputRef.current?.focus();
       }
       if (modifier && event.key.toLowerCase() === "p") {
         event.preventDefault();
@@ -386,9 +387,10 @@ function App() {
 
   const updateNote = async (changes: Partial<Note>) => {
     if (!activeNote) return;
+    const noteId = activeNote.id;
     const updatedAt = new Date().toISOString();
     setSaved(false);
-    setSaveError("");
+    setNoteSaveErrors((current) => ({ ...current, [noteId]: "" }));
     setNotes((current) => current.map((note) => note.id === activeNote.id
       ? { ...note, ...changes, updated: "Just now", updatedAt }
       : note));
@@ -398,8 +400,8 @@ function App() {
       return;
     }
 
-    const pendingChanges = pendingNoteChangesRef.current.get(activeNote.id) || {};
-    pendingNoteChangesRef.current.set(activeNote.id, { ...pendingChanges, ...changes });
+    const pendingChanges = pendingNoteChangesRef.current.get(noteId) || {};
+    pendingNoteChangesRef.current.set(noteId, { ...pendingChanges, ...changes });
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(async () => {
       const pendingChanges = Array.from(pendingNoteChangesRef.current.entries());
@@ -426,9 +428,14 @@ function App() {
         if (error && !firstError) firstError = error.message;
       }));
       if (firstError) {
-        setSaveError(firstError);
+        setNoteSaveErrors((current) => ({ ...current, [noteId]: firstError }));
         return;
       }
+      setNoteSaveErrors((current) => {
+        const next = { ...current };
+        delete next[noteId];
+        return next;
+      });
       setSaved(true);
     }, 500);
   };
@@ -736,7 +743,7 @@ function App() {
         {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
           <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star"><Star size={13} fill="currentColor" /></span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div></section>
 
-          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {saveError || (saved ? "Saved" : "Saving…")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder">{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
+          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {noteSaveErrors[activeNote.id] || saveError || (saved ? "Saved" : "Saving…")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder">{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
         </div>}
       </section>
       {commandPaletteOpen && <CommandPalette onClose={() => setCommandPaletteOpen(false)} onNewNote={() => { setCommandPaletteOpen(false); void createNote(); }} onNewFolder={() => { setCommandPaletteOpen(false); void createFolder(); }} onAllNotes={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onFavorites={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} onRecent={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} onGraph={() => { setCommandPaletteOpen(false); setWorkspaceView("graph"); }} onToggleTheme={() => { setCommandPaletteOpen(false); setTheme(theme === "light" ? "dark" : "light"); }} />}
