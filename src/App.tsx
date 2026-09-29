@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive, ChevronDown, ChevronRight, ChevronUp, Clock3, File, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
   LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Sparkles, Star, Sun, Tag, X,
@@ -198,35 +198,31 @@ function App() {
       }
     }
     const foldersById = new Map(nextFolders.map((folder) => [folder.id, folder]));
-    const jamalDrentheByParent = new Map(
-      nextFolders
-        .filter((folder) => folder.name === "Jamal Drenthe")
-        .map((folder) => [folder.parentId, folder]),
-    );
     const angelsMediateFolders = nextFolders.filter((folder) => folder.name === "Angels Mediate");
-    if (angelsMediateFolders.length && jamalDrentheByParent.size) {
+    if (angelsMediateFolders.length) {
       const legacyCompanyNames = new Set(["CloudiAudi", "CyberSec360", "Huasca", "In De Roos", "OpenCourse", "Overskilled"]);
-      const foldersToRepair = nextFolders.filter((folder) => {
-        if (!legacyCompanyNames.has(folder.name)) return false;
+      const foldersToRepair = nextFolders.flatMap((folder) => {
+        if (!legacyCompanyNames.has(folder.name)) return [];
         const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
-        return parent?.name === "Angels Mediate";
+        const targetParent = parent?.parentId ? foldersById.get(parent.parentId) : undefined;
+        return parent?.name === "Angels Mediate" && targetParent?.name === "Jamal Drenthe"
+          ? [{ folder, targetParent }]
+          : [];
       });
       if (foldersToRepair.length) {
-        const repairResults = await Promise.all(foldersToRepair.map((folder) => (
+        const repairResults = await Promise.all(foldersToRepair.map(({ folder, targetParent }) => (
           client.from("folders").update({
-            parent_id: jamalDrentheByParent.get(foldersById.get(folder.parentId || "")?.parentId)?.id || null,
+            parent_id: targetParent.id,
           }).eq("id", folder.id).eq("user_id", currentUserId)
         )));
         const repairError = repairResults.find((result) => result.error)?.error;
         if (repairError) {
           setSaveError(repairError.message);
         } else {
+          const repairTargets = new Map(foldersToRepair.map(({ folder, targetParent }) => [folder.id, targetParent]));
           nextFolders = nextFolders.map((folder) => {
-            const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
-            const repairedParent = parent?.name === "Angels Mediate"
-              ? jamalDrentheByParent.get(parent.parentId)
-              : undefined;
-            return repairedParent && legacyCompanyNames.has(folder.name)
+            const repairedParent = repairTargets.get(folder.id);
+            return repairedParent
               ? { ...folder, parentId: repairedParent.id }
               : folder;
           });
@@ -323,6 +319,7 @@ function App() {
       }
       if (modifier && event.key.toLowerCase() === "n") {
         event.preventDefault();
+        setCommandPaletteOpen(false);
         void createNote();
       }
       if (event.key === "Escape") {
@@ -484,6 +481,7 @@ function App() {
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
     setSaved(false);
+    setSaveError("");
     if (supabase && userId) {
       const { error } = await supabase.from("folders").insert({
         id: folder.id,
@@ -762,11 +760,32 @@ function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNod
 }
 
 function CommandPalette({ onClose, onNewNote, onNewFolder, onAllNotes, onFavorites, onRecent, onGraph, onToggleTheme }: { onClose: () => void; onNewNote: () => void; onNewFolder: () => void; onAllNotes: () => void; onFavorites: () => void; onRecent: () => void; onGraph: () => void; onToggleTheme: () => void }) {
-  return <div className="command-backdrop" role="presentation" onMouseDown={onClose}><section className="command-palette" role="dialog" aria-modal="true" aria-labelledby="command-title" onMouseDown={(event) => event.stopPropagation()}><div className="command-heading"><div><p className="eyebrow">Quick actions</p><h2 id="command-title">What do you want to do?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close quick actions"><X size={17} /></button></div><div className="command-list"><CommandAction icon={<Plus size={16} />} label="New note" shortcut="Ctrl N" onClick={onNewNote} /><CommandAction icon={<FolderPlus size={16} />} label="New folder" onClick={onNewFolder} /><CommandAction icon={<LayoutGrid size={16} />} label="Show all notes" onClick={onAllNotes} /><CommandAction icon={<Star size={16} />} label="Show favorites" onClick={onFavorites} /><CommandAction icon={<Clock3 size={16} />} label="Show recently edited" onClick={onRecent} /><CommandAction icon={<Network size={16} />} label="Open knowledge graph" onClick={onGraph} /><CommandAction icon={<Moon size={16} />} label="Toggle appearance" onClick={onToggleTheme} /></div><p className="command-hint">Press Esc to close</p></section></div>;
+  const dialogRef = useRef<HTMLElement>(null);
+  const firstActionRef = useRef<HTMLButtonElement>(null);
+
+  useLayoutEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    firstActionRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])") || []);
+    if (!focusable.length) return;
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.shiftKey
+      ? currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1
+      : currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+    event.preventDefault();
+    focusable[nextIndex]?.focus();
+  };
+
+  return <div className="command-backdrop" role="presentation" onMouseDown={onClose}><section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby="command-title" onKeyDown={handleKeyDown} onMouseDown={(event) => event.stopPropagation()}><div className="command-heading"><div><p className="eyebrow">Quick actions</p><h2 id="command-title">What do you want to do?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close quick actions"><X size={17} /></button></div><div className="command-list"><CommandAction buttonRef={firstActionRef} icon={<Plus size={16} />} label="New note" shortcut="Ctrl N" onClick={onNewNote} /><CommandAction icon={<FolderPlus size={16} />} label="New folder" onClick={onNewFolder} /><CommandAction icon={<LayoutGrid size={16} />} label="Show all notes" onClick={onAllNotes} /><CommandAction icon={<Star size={16} />} label="Show favorites" onClick={onFavorites} /><CommandAction icon={<Clock3 size={16} />} label="Show recently edited" onClick={onRecent} /><CommandAction icon={<Network size={16} />} label="Open knowledge graph" onClick={onGraph} /><CommandAction icon={<Moon size={16} />} label="Toggle appearance" onClick={onToggleTheme} /></div><p className="command-hint">Press Esc to close</p></section></div>;
 }
 
-function CommandAction({ icon, label, shortcut, onClick }: { icon: React.ReactNode; label: string; shortcut?: string; onClick: () => void }) {
-  return <button className="command-action" onClick={onClick}><span>{icon}{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
+function CommandAction({ buttonRef, icon, label, shortcut, onClick }: { buttonRef?: React.RefObject<HTMLButtonElement | null>; icon: React.ReactNode; label: string; shortcut?: string; onClick: () => void }) {
+  return <button ref={buttonRef} className="command-action" onClick={onClick}><span>{icon}{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
 }
 
 function GraphView() {
