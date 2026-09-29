@@ -144,7 +144,10 @@ function App() {
   const pendingNoteChangesRef = useRef<Map<string, Partial<Note>>>(new Map());
   const saveGenerationRef = useRef(0);
   const authGenerationRef = useRef(0);
+  const authenticatedUserRef = useRef<string | null>(null);
   const loadedWorkspaceUserRef = useRef<string | null>(null);
+  const workspaceLoadTokenRef = useRef(0);
+  const activeWorkspaceLoadRef = useRef<{ userId: string; token: number } | null>(null);
 
   const invalidatePendingNoteSaves = () => {
     saveGenerationRef.current += 1;
@@ -354,10 +357,20 @@ function App() {
     if (!supabase) return;
     const client = supabase;
     const loadWorkspaceForUser = async (currentUserId: string, authGeneration: number) => {
-      if (authGeneration !== authGenerationRef.current || loadedWorkspaceUserRef.current === currentUserId) return;
+      if (
+        authGeneration !== authGenerationRef.current
+        || loadedWorkspaceUserRef.current === currentUserId
+        || activeWorkspaceLoadRef.current?.userId === currentUserId
+      ) return;
+      const loadToken = workspaceLoadTokenRef.current + 1;
+      workspaceLoadTokenRef.current = loadToken;
+      activeWorkspaceLoadRef.current = { userId: currentUserId, token: loadToken };
       loadedWorkspaceUserRef.current = currentUserId;
       const loaded = await loadWorkspace(currentUserId, authGeneration);
-      if (!loaded && loadedWorkspaceUserRef.current === currentUserId) {
+      if (activeWorkspaceLoadRef.current?.token === loadToken) {
+        activeWorkspaceLoadRef.current = null;
+      }
+      if (!loaded && loadedWorkspaceUserRef.current === currentUserId && workspaceLoadTokenRef.current === loadToken) {
         loadedWorkspaceUserRef.current = null;
       }
     };
@@ -366,23 +379,43 @@ function App() {
       const { data } = await client.auth.getSession();
       const hasAccess = data.session ? await verifyAccess(data.session.user.id) : false;
       if (authGeneration !== authGenerationRef.current) return;
+      const currentUserId = data.session && hasAccess ? data.session.user.id : null;
+      if (authenticatedUserRef.current !== currentUserId) {
+        authenticatedUserRef.current = currentUserId;
+        authGenerationRef.current += 1;
+        activeWorkspaceLoadRef.current = null;
+        workspaceLoadTokenRef.current += 1;
+        loadedWorkspaceUserRef.current = null;
+      }
+      const currentAuthGeneration = authGenerationRef.current;
       setAuthenticated(Boolean(data.session && hasAccess));
-      setUserId(data.session && hasAccess ? data.session.user.id : null);
+      setUserId(currentUserId);
       setSessionReady(true);
       if (data.session && hasAccess) {
-        await loadWorkspaceForUser(data.session.user.id, authGeneration);
+        await loadWorkspaceForUser(data.session.user.id, currentAuthGeneration);
       }
     };
     const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
-      const authGeneration = ++authGenerationRef.current;
+      const nextUserId = nextSession?.user.id || null;
+      if (authenticatedUserRef.current !== nextUserId) {
+        authenticatedUserRef.current = nextUserId;
+        authGenerationRef.current += 1;
+        activeWorkspaceLoadRef.current = null;
+        workspaceLoadTokenRef.current += 1;
+        loadedWorkspaceUserRef.current = null;
+      }
+      const authGeneration = authGenerationRef.current;
       setSessionReady(true);
       const hasAccess = nextSession ? await verifyAccess(nextSession.user.id) : false;
       if (authGeneration !== authGenerationRef.current) return;
+      if (!hasAccess) authenticatedUserRef.current = null;
       setAuthenticated(Boolean(nextSession && hasAccess));
       setUserId(nextSession && hasAccess ? nextSession.user.id : null);
       if (nextSession && hasAccess) {
         await loadWorkspaceForUser(nextSession.user.id, authGeneration);
       } else {
+        activeWorkspaceLoadRef.current = null;
+        workspaceLoadTokenRef.current += 1;
         loadedWorkspaceUserRef.current = null;
         invalidatePendingNoteSaves();
         setFolders([]);
