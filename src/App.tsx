@@ -169,10 +169,10 @@ function App() {
         return;
       }
     } else if (!nextFolders.some((folder) => folder.name === "Bedrijven")) {
-      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map((folder, index) => ({
+      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map(({ parentId, ...folder }, index) => ({
         ...folder,
         user_id: currentUserId,
-        parent_id: folder.parentId,
+        parent_id: parentId,
         position: nextFolders.length + index,
       }));
       const { error } = await supabase.from("folders").insert(importedFolders);
@@ -182,30 +182,41 @@ function App() {
           parentId: parent_id,
         }));
         nextFolders = [...nextFolders, ...importedFolderItems];
-        const quantumFolder = importedFolderItems.find((folder) => folder.name === "QuantumInitium");
-        if (quantumFolder) {
-          const importedNotes = importedDocumentBlueprint.map((title) => ({
-            id: crypto.randomUUID(),
-            user_id: currentUserId,
-            folder_id: quantumFolder.id,
-            title,
-            body: "Imported from the Knowledge OS folder structure. Attach the original file here when it is available.",
-            tags: ["imported"],
-            favorite: false,
-          }));
-          const { error: notesError } = await supabase.from("notes").insert(importedNotes);
-          if (!notesError) {
-            nextNotes = [...nextNotes, ...importedNotes.map((note) => ({
-              id: note.id,
-              title: note.title,
-              body: note.body,
-              updated: "Just now",
-              folderId: note.folder_id,
-              tags: note.tags,
-              favorite: note.favorite,
-              attachments: [],
-            }))];
-          }
+      }
+    }
+    const quantumFolder = nextFolders.find((folder) => folder.name === "QuantumInitium");
+    if (quantumFolder) {
+      const existingTitles = new Set(
+        nextNotes
+          .filter((note) => note.folderId === quantumFolder.id)
+          .map((note) => note.title),
+      );
+      const missingImportedNotes = importedDocumentBlueprint
+        .filter((title) => !existingTitles.has(title))
+        .map((title) => ({
+          id: crypto.randomUUID(),
+          user_id: currentUserId,
+          folder_id: quantumFolder.id,
+          title,
+          body: "Imported from the Knowledge OS folder structure. Attach the original file here when it is available.",
+          tags: ["imported"],
+          favorite: false,
+        }));
+      if (missingImportedNotes.length) {
+        const { error: notesError } = await supabase.from("notes").insert(missingImportedNotes);
+        if (notesError) {
+          setSaveError(notesError.message);
+        } else {
+          nextNotes = [...nextNotes, ...missingImportedNotes.map((note) => ({
+            id: note.id,
+            title: note.title,
+            body: note.body,
+            updated: "Just now",
+            folderId: note.folder_id,
+            tags: note.tags,
+            favorite: note.favorite,
+            attachments: [],
+          }))];
         }
       }
     }
