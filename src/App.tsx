@@ -10,7 +10,7 @@ type FolderItem = { id: string; name: string; parentId: string | null; color: st
 type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
-  tags: string[]; favorite?: boolean; attachments: Attachment[];
+  tags: string[]; favorite?: boolean; attachments: Attachment[]; importKey?: string;
 };
 
 const importedFolderBlueprint: Array<{ name: string; parent: string | null; color: string }> = [
@@ -65,7 +65,10 @@ const initialFolders: FolderItem[] = [
   { id: "quantum", name: "Quantum Initium", parentId: "projects", color: "blue", position: 0 },
 ];
 const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC", "Projects"]);
-const importedDocumentBlueprint = ["QuantumInitium Growth Engine (PDF)", "QuantumInitium"];
+const importedDocumentBlueprint = [
+  { key: "quantuminitium-growth-engine-pdf", title: "QuantumInitium Growth Engine (PDF)" },
+  { key: "quantuminitium", title: "QuantumInitium" },
+];
 
 const initialNotes: Note[] = [
   {
@@ -78,7 +81,7 @@ const initialNotes: Note[] = [
   { id: "rhythm", title: "AI-native operating rhythm", body: "A weekly loop for capturing signal, choosing priorities, and converting context into focused execution.", updated: "Sep 25", folderId: "systems", tags: ["ai", "workflow"], attachments: [] },
 ];
 
-function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_id: string | null; tags: string[]; favorite: boolean; updated_at: string }>, attachmentRows: Array<{ id: string; note_id: string; storage_path: string; file_name: string; mime_type: string | null; file_size: number | null }>): Note[] {
+function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_id: string | null; tags: string[]; favorite: boolean; updated_at: string; import_key: string | null }>, attachmentRows: Array<{ id: string; note_id: string; storage_path: string; file_name: string; mime_type: string | null; file_size: number | null }>): Note[] {
   return rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -87,6 +90,7 @@ function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_
     folderId: row.folder_id || "",
     tags: row.tags || [],
     favorite: row.favorite,
+    importKey: row.import_key || undefined,
     attachments: attachmentRows.filter((attachment) => attachment.note_id === row.id).map((attachment) => ({
       id: attachment.id,
       name: attachment.file_name,
@@ -135,7 +139,7 @@ function App() {
     setSaveError("");
     const [folderResult, noteResult, attachmentResult] = await Promise.all([
       supabase.from("folders").select("id,name,parent_id,color,position").eq("user_id", currentUserId).order("position").order("created_at"),
-      supabase.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
+      supabase.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at,import_key").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
       supabase.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
     ]);
     const firstError = folderResult.error || noteResult.error || attachmentResult.error;
@@ -157,7 +161,7 @@ function App() {
       nextFolders = initialFolders.map((folder) => ({ ...folder, id: folderIds.get(folder.id) || folder.id, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null }));
       nextNotes = initialNotes.map((note) => ({ ...note, id: crypto.randomUUID(), folderId: folderIds.get(note.folderId) || nextFolders[0].id }));
       const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position }));
-      const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false }));
+      const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false, import_key: note.importKey || null }));
       const [foldersInsert, notesInsert] = await Promise.all([
         supabase.from("folders").insert(foldersToInsert),
         supabase.from("notes").insert(notesToInsert),
@@ -169,10 +173,10 @@ function App() {
         return;
       }
     } else if (!nextFolders.some((folder) => folder.name === "Bedrijven")) {
-      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map((folder, index) => ({
+      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map(({ parentId, ...folder }, index) => ({
         ...folder,
         user_id: currentUserId,
-        parent_id: folder.parentId,
+        parent_id: parentId,
         position: nextFolders.length + index,
       }));
       const { error } = await supabase.from("folders").insert(importedFolders);
@@ -182,29 +186,58 @@ function App() {
           parentId: parent_id,
         }));
         nextFolders = [...nextFolders, ...importedFolderItems];
-        const quantumFolder = importedFolderItems.find((folder) => folder.name === "QuantumInitium");
-        if (quantumFolder) {
-          const importedNotes = importedDocumentBlueprint.map((title) => ({
-            id: crypto.randomUUID(),
-            user_id: currentUserId,
-            folder_id: quantumFolder.id,
-            title,
-            body: "Imported from the Knowledge OS folder structure. Attach the original file here when it is available.",
-            tags: ["imported"],
-            favorite: false,
-          }));
-          const { error: notesError } = await supabase.from("notes").insert(importedNotes);
-          if (!notesError) {
-            nextNotes = [...nextNotes, ...importedNotes.map((note) => ({
-              id: note.id,
-              title: note.title,
-              body: note.body,
-              updated: "Just now",
-              folderId: note.folder_id,
-              tags: note.tags,
-              favorite: note.favorite,
-              attachments: [],
-            }))];
+      }
+    }
+    const quantumFolder = nextFolders.find((folder) => (
+      folder.name === "QuantumInitium"
+      && nextFolders.some((parent) => parent.id === folder.parentId && parent.name === "Jamal Drenthe")
+      && nextFolders.some((grandparent) => {
+        const parent = nextFolders.find((candidate) => candidate.id === folder.parentId);
+        return parent?.parentId === grandparent.id && grandparent.name === "Bedrijven";
+      })
+    ));
+    if (quantumFolder) {
+      const existingImportKeys = new Set(
+        nextNotes
+          .filter((note) => note.folderId === quantumFolder.id)
+          .map((note) => note.importKey)
+          .filter((key): key is string => Boolean(key)),
+      );
+      const missingImportedNotes = importedDocumentBlueprint
+        .filter(({ key }) => !existingImportKeys.has(key))
+        .map(({ key, title }) => ({
+          id: crypto.randomUUID(),
+          user_id: currentUserId,
+          folder_id: quantumFolder.id,
+          import_key: key,
+          title,
+          body: "Imported from the Knowledge OS folder structure. Attach the original file here when it is available.",
+          tags: ["imported"],
+          favorite: false,
+        }));
+      if (missingImportedNotes.length) {
+        const { error: notesError } = await supabase.from("notes").upsert(
+          missingImportedNotes,
+          { onConflict: "user_id,import_key", ignoreDuplicates: true },
+        );
+        if (notesError) {
+          setSaveError(notesError.message);
+        } else {
+          const importKeys = missingImportedNotes.map((note) => note.import_key);
+          const { data: importedNoteRows, error: importedNotesError } = await supabase
+            .from("notes")
+            .select("id,title,body,folder_id,tags,favorite,updated_at,import_key")
+            .eq("user_id", currentUserId)
+            .in("import_key", importKeys);
+          if (importedNotesError) {
+            setSaveError(importedNotesError.message);
+          } else {
+            const importedNotes = mapNotes(importedNoteRows || [], []);
+            const importedKeys = new Set(importKeys);
+            nextNotes = [
+              ...nextNotes.filter((note) => !note.importKey || !importedKeys.has(note.importKey)),
+              ...importedNotes,
+            ];
           }
         }
       }
