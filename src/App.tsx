@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive, ChevronDown, ChevronRight, ChevronUp, File, FilePlus2, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
-  LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Settings2, Sparkles, Sun, X,
+  Archive, ChevronDown, ChevronRight, ChevronUp, Clock3, File, FilePlus2, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
+  LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Settings2, Sparkles, Star, Sun, Tag, X,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -10,7 +10,7 @@ type FolderItem = { id: string; name: string; parentId: string | null; color: st
 type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
-  tags: string[]; favorite?: boolean; attachments: Attachment[]; importKey?: string;
+  tags: string[]; favorite?: boolean; attachments: Attachment[]; importKey?: string; updatedAt?: string;
 };
 
 const importedFolderBlueprint: Array<{ name: string; parent: string | null; color: string }> = [
@@ -74,11 +74,11 @@ const initialNotes: Note[] = [
   {
     id: "thesis", title: "The Knowledge OS thesis",
     body: "The best ideas should not disappear into chat history. They need a home that makes them easy to revisit, connect and turn into something real.\n\nA personal knowledge operating system is the layer between what I notice and what I build. It should make context compound instead of resetting every time a new project starts.\n\nCore principles\n- Capture ideas with almost zero friction.\n- Connect related thoughts automatically and visibly.\n- Keep ownership, history and permissions explicit.\n\nThe value is not in storing more information. It is in making the right context available at the right moment.",
-    updated: "Just now", folderId: "ideas", tags: ["vision", "systems"], favorite: true, attachments: [],
+    updated: "Just now", updatedAt: "2026-09-29T08:40:00.000Z", folderId: "ideas", tags: ["vision", "systems"], favorite: true, attachments: [],
   },
-  { id: "quantum", title: "Quantum Initium · 2026 direction", body: "Clarify the holding narrative: a portfolio of useful, compounding businesses with a clear operating system.", updated: "Yesterday", folderId: "quantum", tags: ["quantum", "strategy"], attachments: [] },
-  { id: "reuse", title: "Build once, reuse everywhere", body: "Product decisions that should become shared patterns across the portfolio instead of one-off features.", updated: "Sep 27", folderId: "principles", tags: ["leverage", "product"], attachments: [] },
-  { id: "rhythm", title: "AI-native operating rhythm", body: "A weekly loop for capturing signal, choosing priorities, and converting context into focused execution.", updated: "Sep 25", folderId: "systems", tags: ["ai", "workflow"], attachments: [] },
+  { id: "quantum", title: "Quantum Initium · 2026 direction", body: "Clarify the holding narrative: a portfolio of useful, compounding businesses with a clear operating system.", updated: "Yesterday", updatedAt: "2026-09-28T08:40:00.000Z", folderId: "quantum", tags: ["quantum", "strategy"], attachments: [] },
+  { id: "reuse", title: "Build once, reuse everywhere", body: "Product decisions that should become shared patterns across the portfolio instead of one-off features.", updated: "Sep 27", updatedAt: "2026-09-27T08:40:00.000Z", folderId: "principles", tags: ["leverage", "product"], attachments: [] },
+  { id: "rhythm", title: "AI-native operating rhythm", body: "A weekly loop for capturing signal, choosing priorities, and converting context into focused execution.", updated: "Sep 25", updatedAt: "2026-09-25T08:40:00.000Z", folderId: "systems", tags: ["ai", "workflow"], attachments: [] },
 ];
 
 function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_id: string | null; tags: string[]; favorite: boolean; updated_at: string; import_key: string | null }>, attachmentRows: Array<{ id: string; note_id: string; storage_path: string; file_name: string; mime_type: string | null; file_size: number | null }>): Note[] {
@@ -87,6 +87,7 @@ function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_
     title: row.title,
     body: row.body,
     updated: new Date(row.updated_at).toLocaleDateString(),
+    updatedAt: row.updated_at,
     folderId: row.folder_id || "",
     tags: row.tags || [],
     favorite: row.favorite,
@@ -117,6 +118,9 @@ function App() {
   const [activeNoteId, setActiveNoteId] = useState(initialNotes[0].id);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
+  const [noteFilter, setNoteFilter] = useState<"all" | "recent" | "favorites">("all");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"notes" | "graph">("notes");
   const [mobileNav, setMobileNav] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => Object.fromEntries(initialFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
@@ -132,6 +136,9 @@ function App() {
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; mode: "before" | "inside" | "after" } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const pendingNoteChangesRef = useRef<Map<string, Partial<Note>>>(new Map());
 
   const loadWorkspace = async (currentUserId: string) => {
     if (!supabase) return;
@@ -266,6 +273,23 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (modifier && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        void createNote();
+      }
+      if (event.key === "Escape") setMobileNav(false);
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  });
+
+  useEffect(() => {
     if (!supabase) return;
     const client = supabase;
     const loadSession = async () => {
@@ -296,37 +320,82 @@ function App() {
   const folderMap = useMemo(() => new Map(folders.map((folder) => [folder.id, folder])), [folders]);
   const filteredNotes = useMemo(() => {
     const query = search.toLowerCase().trim();
-    return notes.filter((note) => {
+    const visibleNotes = notes.filter((note) => {
       const inFolder = !activeFolderId || isDescendantFolder(note.folderId, activeFolderId, folderMap);
       const matches = !query || `${note.title} ${note.body} ${note.tags.join(" ")}`.toLowerCase().includes(query);
-      return inFolder && matches;
+      const matchesFilter = noteFilter === "all"
+        || (noteFilter === "favorites" && note.favorite)
+        || (noteFilter === "recent" && Boolean(note.updatedAt));
+      const matchesTag = !tagFilter || note.tags.includes(tagFilter);
+      return inFolder && matches && matchesFilter && matchesTag;
     });
-  }, [activeFolderId, folderMap, notes, search]);
+    return noteFilter === "recent"
+      ? visibleNotes.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+      : visibleNotes;
+  }, [activeFolderId, folderMap, noteFilter, notes, search, tagFilter]);
+
+  const availableTags = useMemo(
+    () => Array.from(new Set(notes.flatMap((note) => note.tags))).sort((a, b) => a.localeCompare(b)),
+    [notes],
+  );
 
   const updateNote = async (changes: Partial<Note>) => {
     if (!activeNote) return;
+    const updatedAt = new Date().toISOString();
     setSaved(false);
     setSaveError("");
-    setNotes((current) => current.map((note) => note.id === activeNote.id ? { ...note, ...changes, updated: "Just now" } : note));
-    if (!supabase || !userId) return;
-    const { error } = await supabase.from("notes").update({
-      title: changes.title,
-      body: changes.body,
-      tags: changes.tags,
-      favorite: changes.favorite,
-      folder_id: changes.folderId,
-      updated_at: new Date().toISOString(),
-    }).eq("id", activeNote.id).eq("user_id", userId);
-    if (error) {
-      setSaveError(error.message);
+    setNotes((current) => current.map((note) => note.id === activeNote.id
+      ? { ...note, ...changes, updated: "Just now", updatedAt }
+      : note));
+    const client = supabase;
+    if (!client || !userId) {
+      setSaved(true);
       return;
     }
-    setSaved(true);
+
+    const pendingChanges = pendingNoteChangesRef.current.get(activeNote.id) || {};
+    pendingNoteChangesRef.current.set(activeNote.id, { ...pendingChanges, ...changes });
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(async () => {
+      const pendingChanges = Array.from(pendingNoteChangesRef.current.entries());
+      pendingNoteChangesRef.current.clear();
+      if (!pendingChanges.length) return;
+      let firstError = "";
+      await Promise.all(pendingChanges.map(async ([noteId, noteChanges]) => {
+        const noteUpdate: {
+          title?: string;
+          body?: string;
+          tags?: string[];
+          favorite?: boolean;
+          folder_id?: string | null;
+          updated_at: string;
+        } = { updated_at: new Date().toISOString() };
+        if (noteChanges.title !== undefined) noteUpdate.title = noteChanges.title;
+        if (noteChanges.body !== undefined) noteUpdate.body = noteChanges.body;
+        if (noteChanges.tags !== undefined) noteUpdate.tags = noteChanges.tags;
+        if (noteChanges.favorite !== undefined) noteUpdate.favorite = noteChanges.favorite;
+        if (noteChanges.folderId !== undefined) noteUpdate.folder_id = noteChanges.folderId || null;
+        const { error } = await client.from("notes").update(noteUpdate)
+          .eq("id", noteId)
+          .eq("user_id", userId);
+        if (error && !firstError) firstError = error.message;
+      }));
+      if (firstError) {
+        setSaveError(firstError);
+        return;
+      }
+      setSaved(true);
+    }, 500);
   };
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+  }, []);
 
   const createNote = async () => {
     const folderId = activeFolderId || folders[0]?.id || null;
-    const note: Note = { id: crypto.randomUUID(), title: "Untitled note", body: "", updated: "Just now", folderId: folderId || "", tags: [], attachments: [] };
+    const updatedAt = new Date().toISOString();
+    const note: Note = { id: crypto.randomUUID(), title: "Untitled note", body: "", updated: "Just now", updatedAt, folderId: folderId || "", tags: [], attachments: [] };
     if (supabase && userId) {
       const { error } = await supabase.from("notes").insert({
         id: note.id,
@@ -345,6 +414,22 @@ function App() {
     setActiveNoteId(note.id);
     setWorkspaceView("notes");
     setSaved(true);
+  };
+
+  const addTag = () => {
+    if (!activeNote) return;
+    const tag = tagDraft.trim().replace(/^#/, "").replace(/\s+/g, "-").toLowerCase();
+    if (!tag || activeNote.tags.includes(tag)) {
+      setTagDraft("");
+      return;
+    }
+    void updateNote({ tags: [...activeNote.tags, tag] });
+    setTagDraft("");
+  };
+
+  const removeTag = (tag: string) => {
+    if (!activeNote) return;
+    void updateNote({ tags: activeNote.tags.filter((item) => item !== tag) });
   };
 
   const createFolder = async () => {
@@ -580,24 +665,25 @@ function App() {
         <div className="vault-switcher"><span className="avatar">JD</span><span className="vault-copy"><strong>Personal vault</strong><small>Private workspace</small></span><ChevronDown size={15} /></div>
         <div className="sidebar-actions"><button onClick={createNote}><FilePlus2 size={15} /> New note</button><button onClick={createFolder}><FolderPlus size={15} /> New folder</button></div>
         <nav className="side-nav" aria-label="Main navigation">
-          <NavItem icon={<LayoutGrid size={16} />} label="All notes" active={workspaceView === "notes" && !activeFolderId} onClick={() => { setActiveFolderId(null); setWorkspaceView("notes"); }} count={String(notes.length)} />
-          <NavItem icon={<Archive size={16} />} label="Recently edited" onClick={() => setWorkspaceView("notes")} />
+          <NavItem icon={<LayoutGrid size={16} />} label="All notes" active={workspaceView === "notes" && !activeFolderId && noteFilter === "all" && !tagFilter} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} count={String(notes.length)} />
+          <NavItem icon={<Clock3 size={16} />} label="Recently edited" active={noteFilter === "recent"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} />
+          <NavItem icon={<Star size={16} />} label="Favorites" active={noteFilter === "favorites"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} count={String(notes.filter((note) => note.favorite).length)} />
           <div className="nav-label">Folders</div>
-          {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} />)}
+          {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} />)}
           <div className="nav-label">Explore</div>
           <NavItem icon={<Network size={16} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
-          <NavItem icon={<Hash size={16} />} label="Tags" />
+          <div className="tags-nav"><div className="tags-nav-heading"><Tag size={14} /> Tags</div>{availableTags.slice(0, 8).map((tag) => <button key={tag} className={`tag-nav-item ${tagFilter === tag ? "active" : ""}`} onClick={() => { setActiveFolderId(null); setNoteFilter("all"); setTagFilter(tag); setWorkspaceView("notes"); }}>#{tag}<small>{notes.filter((note) => note.tags.includes(tag)).length}</small></button>)}</div>
         </nav>
         <div className="sidebar-bottom"><div className="sync-card"><Sparkles size={15} /><div><strong>Private by design</strong><span>Sync with your own vault.</span></div></div><NavItem icon={<Settings2 size={16} />} label="Settings" /><div className="profile-row"><span className="avatar avatar-large">JD</span><span><strong>Jamal Drenthe</strong><small>Owner</small></span><button className="profile-login" onClick={() => void handleSignOut()} aria-label="Log out"><LogOut size={15} /></button></div></div>
       </aside>
 
       <section className="workspace">
-        <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Personal vault</span><span className="crumb-separator">/</span><strong>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</strong></div><div className="topbar-actions"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your vault..." /><kbd>⌘ K</kbd></div><button className="icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button><button className="new-note-button" onClick={createNote}><Plus size={17} /> New note</button></div></header>
+        <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Personal vault</span><span className="crumb-separator">/</span><strong>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</strong></div><div className="topbar-actions"><div className="search-box"><Search size={16} /><input ref={searchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your vault..." /><kbd>⌘/Ctrl K</kbd></div><button className="icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button><button className="new-note-button" onClick={createNote}><Plus size={17} /> New note</button></div></header>
 
         {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
-          <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star">✦</span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div><button className="load-more" onClick={createNote}><Plus size={14} /> Create a note</button></section>
+          <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star"><Star size={13} fill="currentColor" /></span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div><button className="load-more" onClick={createNote}><Plus size={14} /> Create a note</button></section>
 
-          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {saveError || (saved ? "Saved" : "Saving…")}</div><div className="editor-actions"><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> {folderMap.get(activeNote.folderId)?.name || "Notes"} <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <span key={tag}><Hash size={13} />{tag}</span>)}</div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
+          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {saveError || (saved ? "Saved" : "Saving…")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder">{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
         </div>}
       </section>
       {showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} />}
