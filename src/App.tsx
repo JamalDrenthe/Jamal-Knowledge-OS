@@ -143,6 +143,7 @@ function App() {
   const saveTimerRef = useRef<number | null>(null);
   const pendingNoteChangesRef = useRef<Map<string, Partial<Note>>>(new Map());
   const saveGenerationRef = useRef(0);
+  const loadedWorkspaceUserRef = useRef<string | null>(null);
 
   const invalidatePendingNoteSaves = () => {
     saveGenerationRef.current += 1;
@@ -353,7 +354,10 @@ function App() {
       setAuthenticated(Boolean(data.session && hasAccess));
       setUserId(data.session && hasAccess ? data.session.user.id : null);
       setSessionReady(true);
-      if (data.session && hasAccess) await loadWorkspace(data.session.user.id);
+      if (data.session && hasAccess) {
+        loadedWorkspaceUserRef.current = data.session.user.id;
+        await loadWorkspace(data.session.user.id);
+      }
     };
     void loadSession();
     const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
@@ -361,8 +365,13 @@ function App() {
       const hasAccess = nextSession ? await verifyAccess(nextSession.user.id) : false;
       setAuthenticated(Boolean(nextSession && hasAccess));
       setUserId(nextSession && hasAccess ? nextSession.user.id : null);
-      if (nextSession && hasAccess) await loadWorkspace(nextSession.user.id);
-      else {
+      if (nextSession && hasAccess) {
+        if (loadedWorkspaceUserRef.current !== nextSession.user.id) {
+          loadedWorkspaceUserRef.current = nextSession.user.id;
+          await loadWorkspace(nextSession.user.id);
+        }
+      } else {
+        loadedWorkspaceUserRef.current = null;
         invalidatePendingNoteSaves();
         setFolders([]);
         setNotes([]);
