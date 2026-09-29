@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive, ChevronDown, ChevronRight, File, FilePlus2, Folder, FolderPlus, Hash, LayoutGrid, Link2,
-  LogIn, Menu, Moon, Network, Paperclip, Plus, Search, Settings2, Sparkles, Sun, X,
+  LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Settings2, Sparkles, Sun, X,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -77,6 +77,7 @@ function App() {
   const [workspaceReady, setWorkspaceReady] = useState(!supabase);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState("");
+  const [authError, setAuthError] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -125,6 +126,17 @@ function App() {
     setWorkspaceReady(true);
   };
 
+  const verifyAccess = async (currentUserId: string) => {
+    if (!supabase) return true;
+    const { data, error } = await supabase.from("allowed_users").select("user_id").eq("user_id", currentUserId).maybeSingle();
+    if (error || !data) {
+      await supabase.auth.signOut();
+      setAuthError("Dit account heeft momenteel geen toegang tot deze private workspace.");
+      return false;
+    }
+    return true;
+  };
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("knowledge-os-theme", theme);
@@ -135,17 +147,19 @@ function App() {
     const client = supabase;
     const loadSession = async () => {
       const { data } = await client.auth.getSession();
-      setAuthenticated(Boolean(data.session));
-      setUserId(data.session?.user.id || null);
+      const hasAccess = data.session ? await verifyAccess(data.session.user.id) : false;
+      setAuthenticated(Boolean(data.session && hasAccess));
+      setUserId(data.session && hasAccess ? data.session.user.id : null);
       setSessionReady(true);
-      if (data.session) await loadWorkspace(data.session.user.id);
+      if (data.session && hasAccess) await loadWorkspace(data.session.user.id);
     };
     void loadSession();
     const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
-      setAuthenticated(Boolean(nextSession));
-      setUserId(nextSession?.user.id || null);
       setSessionReady(true);
-      if (nextSession) await loadWorkspace(nextSession.user.id);
+      const hasAccess = nextSession ? await verifyAccess(nextSession.user.id) : false;
+      setAuthenticated(Boolean(nextSession && hasAccess));
+      setUserId(nextSession && hasAccess ? nextSession.user.id : null);
+      if (nextSession && hasAccess) await loadWorkspace(nextSession.user.id);
       else {
         setFolders([]);
         setNotes([]);
@@ -307,6 +321,7 @@ function App() {
 
   const handleEmailAuth = async (event: FormEvent<HTMLFormElement>, email: string, password: string) => {
     event.preventDefault();
+    setAuthError("");
     if (!supabase) {
       setShowAuth(false);
       return;
@@ -314,19 +329,26 @@ function App() {
     const result = authMode === "login"
       ? await supabase.auth.signInWithPassword({ email, password })
       : await supabase.auth.signUp({ email, password });
-    if (!result.error) setShowAuth(false);
+    if (result.error) setAuthError(result.error.message);
+    else setShowAuth(false);
   };
 
   const handleGoogleAuth = async () => {
+    setAuthError("");
     if (!supabase) {
       setShowAuth(false);
       return;
     }
-    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+    const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+    if (error) setAuthError(error.message);
+  };
+
+  const handleSignOut = async () => {
+    if (supabase) await supabase.auth.signOut();
   };
 
   if (!sessionReady) return <main className="loading-screen">Loading your private vault…</main>;
-  if (!authenticated) return <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => undefined} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} locked />;
+  if (!authenticated) return <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => undefined} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} locked />;
   if (!workspaceReady || !activeNote) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
 
   return (
@@ -344,11 +366,11 @@ function App() {
           <NavItem icon={<Network size={16} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
           <NavItem icon={<Hash size={16} />} label="Tags" />
         </nav>
-        <div className="sidebar-bottom"><div className="sync-card"><Sparkles size={15} /><div><strong>Private by design</strong><span>Sync with your own vault.</span></div></div><NavItem icon={<Settings2 size={16} />} label="Settings" /><div className="profile-row"><span className="avatar avatar-large">JD</span><span><strong>Jamal Drenthe</strong><small>Owner</small></span><button className="profile-login" onClick={() => setShowAuth(true)}><LogIn size={15} /></button></div></div>
+        <div className="sidebar-bottom"><div className="sync-card"><Sparkles size={15} /><div><strong>Private by design</strong><span>Sync with your own vault.</span></div></div><NavItem icon={<Settings2 size={16} />} label="Settings" /><div className="profile-row"><span className="avatar avatar-large">JD</span><span><strong>Jamal Drenthe</strong><small>Owner</small></span><button className="profile-login" onClick={() => void handleSignOut()} aria-label="Log out"><LogOut size={15} /></button></div></div>
       </aside>
 
       <section className="workspace">
-        <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Personal vault</span><span className="crumb-separator">/</span><strong>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</strong></div><div className="topbar-actions"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your vault..." /><kbd>⌘ K</kbd></div><button className="icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button><button className="login-button" onClick={() => setShowAuth(true)}>Log in</button><button className="new-note-button" onClick={createNote}><Plus size={17} /> New note</button></div></header>
+        <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Personal vault</span><span className="crumb-separator">/</span><strong>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</strong></div><div className="topbar-actions"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your vault..." /><kbd>⌘ K</kbd></div><button className="icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button><button className="new-note-button" onClick={createNote}><Plus size={17} /> New note</button></div></header>
 
         {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
           <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star">✦</span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div><button className="load-more" onClick={createNote}><Plus size={14} /> Create a note</button></section>
@@ -366,10 +388,10 @@ function FolderTree({ folder, folders, activeFolderId, expanded, onToggle, onSel
   return <div className="folder-tree"><button className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`} onClick={() => onSelect(folder.id)}><span>{children.length ? <span className="tree-toggle" onClick={(event) => { event.stopPropagation(); onToggle(folder.id); }}>{expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span> : <span className="tree-spacer" />}<Folder size={16} />{folder.name}</span><small>{children.length || ""}</small></button>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} /></div>)}</div>;
 }
 
-function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, locked = false }: { mode: "login" | "register"; setMode: (mode: "login" | "register") => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>, email: string, password: string) => void; onGoogle: () => void; locked?: boolean }) {
+function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, error, locked = false }: { mode: "login" | "register"; setMode: (mode: "login" | "register") => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>, email: string, password: string) => void; onGoogle: () => void; error?: string; locked?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  return <div className={`modal-backdrop ${locked ? "auth-locked" : ""}`} role="presentation" onMouseDown={locked ? undefined : onClose}><section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onMouseDown={(event) => event.stopPropagation()}>{!locked && <button className="modal-close" onClick={onClose} aria-label="Close"><X size={17} /></button>}<div className="auth-icon"><Sparkles size={19} /></div><p className="eyebrow">Private workspace</p><h2 id="auth-title">{mode === "login" ? "Welcome back" : "Create your vault"}</h2><p className="auth-copy">Your notes stay yours. Sign in to access your connected knowledge workspace.</p><button className="google-button" onClick={onGoogle}><span>G</span> Continue with Google</button><div className="auth-divider"><span>or use email</span></div><form onSubmit={(event) => onSubmit(event, email, password)}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" minLength={8} required /></label><button className="new-note-button auth-submit" type="submit">{mode === "login" ? "Log in" : "Register"}</button></form><button className="auth-switch" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Need an account? Register" : "Already have an account? Log in"}</button></section></div>;
+  return <div className={`modal-backdrop ${locked ? "auth-locked" : ""}`} role="presentation" onMouseDown={locked ? undefined : onClose}><section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onMouseDown={(event) => event.stopPropagation()}>{!locked && <button className="modal-close" onClick={onClose} aria-label="Close"><X size={17} /></button>}<div className="auth-icon"><Sparkles size={19} /></div><p className="eyebrow">Private workspace</p><h2 id="auth-title">Welcome back</h2><p className="auth-copy">This workspace is currently limited to the owner account.</p>{error && <p className="auth-error" role="alert">{error}</p>}<button className="google-button" onClick={onGoogle}><span>G</span> Continue with Google</button><div className="auth-divider"><span>or use email</span></div><form onSubmit={(event) => onSubmit(event, email, password)}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" minLength={8} required /></label><button className="new-note-button auth-submit" type="submit">Log in</button></form></section></div>;
 }
 
 function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNode; label: string; count?: string; active?: boolean; onClick?: () => void }) {
