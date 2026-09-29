@@ -7,7 +7,7 @@ import { supabase } from "./lib/supabase";
 
 type Theme = "light" | "dark";
 type FolderItem = { id: string; name: string; parentId: string | null; color: string };
-type Attachment = { id: string; name: string; size: string };
+type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
   tags: string[]; favorite?: boolean; attachments: Attachment[];
@@ -32,10 +32,38 @@ const initialNotes: Note[] = [
   { id: "rhythm", title: "AI-native operating rhythm", body: "A weekly loop for capturing signal, choosing priorities, and converting context into focused execution.", updated: "Sep 25", folderId: "systems", tags: ["ai", "workflow"], attachments: [] },
 ];
 
+function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_id: string | null; tags: string[]; favorite: boolean; updated_at: string }>, attachmentRows: Array<{ id: string; note_id: string; storage_path: string; file_name: string; mime_type: string | null; file_size: number | null }>): Note[] {
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    updated: new Date(row.updated_at).toLocaleDateString(),
+    folderId: row.folder_id || "",
+    tags: row.tags || [],
+    favorite: row.favorite,
+    attachments: attachmentRows.filter((attachment) => attachment.note_id === row.id).map((attachment) => ({
+      id: attachment.id,
+      name: attachment.file_name,
+      size: formatBytes(attachment.file_size || 0),
+      storagePath: attachment.storage_path,
+      mimeType: attachment.mime_type || undefined,
+    })),
+  }));
+}
+
+function isDescendantFolder(folderId: string, selectedFolderId: string, folderMap: Map<string, FolderItem>) {
+  let currentId: string | null = folderId;
+  while (currentId) {
+    if (currentId === selectedFolderId) return true;
+    currentId = folderMap.get(currentId)?.parentId || null;
+  }
+  return false;
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("knowledge-os-theme") as Theme) || "light");
-  const [folders, setFolders] = useState(initialFolders);
-  const [notes, setNotes] = useState(initialNotes);
+  const [folders, setFolders] = useState<FolderItem[]>(supabase ? [] : initialFolders);
+  const [notes, setNotes] = useState<Note[]>(supabase ? [] : initialNotes);
   const [activeNoteId, setActiveNoteId] = useState(initialNotes[0].id);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -46,8 +74,56 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [sessionReady, setSessionReady] = useState(!supabase);
   const [authenticated, setAuthenticated] = useState(!supabase);
+  const [workspaceReady, setWorkspaceReady] = useState(!supabase);
   const [saved, setSaved] = useState(true);
+  const [saveError, setSaveError] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadWorkspace = async (currentUserId: string) => {
+    if (!supabase) return;
+    setWorkspaceReady(false);
+    setSaveError("");
+    const [folderResult, noteResult, attachmentResult] = await Promise.all([
+      supabase.from("folders").select("id,name,parent_id,color").eq("user_id", currentUserId).order("created_at"),
+      supabase.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
+      supabase.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
+    ]);
+    const firstError = folderResult.error || noteResult.error || attachmentResult.error;
+    if (firstError) {
+      setSaveError(firstError.message);
+      setWorkspaceReady(true);
+      return;
+    }
+    let nextFolders = (folderResult.data || []).map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      parentId: folder.parent_id,
+      color: folder.color,
+    }));
+    let nextNotes = mapNotes(noteResult.data || [], attachmentResult.data || []);
+    if (!nextFolders.length && !nextNotes.length) {
+      const folderIds = new Map(initialFolders.map((folder) => [folder.id, crypto.randomUUID()]));
+      nextFolders = initialFolders.map((folder) => ({ ...folder, id: folderIds.get(folder.id) || folder.id, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null }));
+      nextNotes = initialNotes.map((note) => ({ ...note, id: crypto.randomUUID(), folderId: folderIds.get(note.folderId) || nextFolders[0].id }));
+      const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color }));
+      const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false }));
+      const [foldersInsert, notesInsert] = await Promise.all([
+        supabase.from("folders").insert(foldersToInsert),
+        supabase.from("notes").insert(notesToInsert),
+      ]);
+      const seedError = foldersInsert.error || notesInsert.error;
+      if (seedError) {
+        setSaveError(seedError.message);
+        setWorkspaceReady(true);
+        return;
+      }
+    }
+    setFolders(nextFolders);
+    setNotes(nextNotes);
+    setActiveNoteId(nextNotes[0]?.id || "");
+    setWorkspaceReady(true);
+  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -56,13 +132,25 @@ function App() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
+    const client = supabase;
+    const loadSession = async () => {
+      const { data } = await client.auth.getSession();
       setAuthenticated(Boolean(data.session));
+      setUserId(data.session?.user.id || null);
       setSessionReady(true);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (data.session) await loadWorkspace(data.session.user.id);
+    };
+    void loadSession();
+    const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
       setAuthenticated(Boolean(nextSession));
+      setUserId(nextSession?.user.id || null);
       setSessionReady(true);
+      if (nextSession) await loadWorkspace(nextSession.user.id);
+      else {
+        setFolders([]);
+        setNotes([]);
+        setWorkspaceReady(true);
+      }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -72,31 +160,74 @@ function App() {
   const filteredNotes = useMemo(() => {
     const query = search.toLowerCase().trim();
     return notes.filter((note) => {
-      const parent = folderMap.get(note.folderId)?.parentId;
-      const inFolder = !activeFolderId || note.folderId === activeFolderId || parent === activeFolderId;
+      const inFolder = !activeFolderId || isDescendantFolder(note.folderId, activeFolderId, folderMap);
       const matches = !query || `${note.title} ${note.body} ${note.tags.join(" ")}`.toLowerCase().includes(query);
       return inFolder && matches;
     });
   }, [activeFolderId, folderMap, notes, search]);
 
-  const updateNote = (changes: Partial<Note>) => {
+  const updateNote = async (changes: Partial<Note>) => {
+    if (!activeNote) return;
     setSaved(false);
+    setSaveError("");
     setNotes((current) => current.map((note) => note.id === activeNote.id ? { ...note, ...changes, updated: "Just now" } : note));
+    if (!supabase || !userId) return;
+    const { error } = await supabase.from("notes").update({
+      title: changes.title,
+      body: changes.body,
+      tags: changes.tags,
+      favorite: changes.favorite,
+      folder_id: changes.folderId,
+      updated_at: new Date().toISOString(),
+    }).eq("id", activeNote.id).eq("user_id", userId);
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    setSaved(true);
   };
 
-  const createNote = () => {
-    const note: Note = { id: crypto.randomUUID(), title: "Untitled note", body: "", updated: "Just now", folderId: activeFolderId || folders[0].id, tags: [], attachments: [] };
+  const createNote = async () => {
+    const folderId = activeFolderId || folders[0]?.id || null;
+    const note: Note = { id: crypto.randomUUID(), title: "Untitled note", body: "", updated: "Just now", folderId: folderId || "", tags: [], attachments: [] };
+    if (supabase && userId) {
+      const { error } = await supabase.from("notes").insert({
+        id: note.id,
+        user_id: userId,
+        folder_id: folderId,
+        title: note.title,
+        body: note.body,
+        tags: note.tags,
+      });
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+    }
     setNotes((current) => [note, ...current]);
     setActiveNoteId(note.id);
     setWorkspaceView("notes");
-    setSaved(false);
+    setSaved(true);
   };
 
-  const createFolder = () => {
+  const createFolder = async () => {
     const name = window.prompt("Naam van de nieuwe map");
     if (!name?.trim()) return;
     const parentId = activeFolderId || null;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet" };
+    if (supabase && userId) {
+      const { error } = await supabase.from("folders").insert({
+        id: folder.id,
+        user_id: userId,
+        name: folder.name,
+        parent_id: folder.parentId,
+        color: folder.color,
+      });
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+    }
     setFolders((current) => [...current, folder]);
     if (parentId) setExpanded((current) => ({ ...current, [parentId]: true }));
     setActiveFolderId(folder.id);
@@ -104,9 +235,74 @@ function App() {
 
   const addAttachments = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    if (!files.length) return;
-    updateNote({ attachments: [...activeNote.attachments, ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, size: formatBytes(file.size) }))] });
+    if (!files.length || !activeNote) return;
+    void uploadAttachments(files);
     event.target.value = "";
+  };
+
+  const uploadAttachments = async (files: File[]) => {
+    if (!activeNote) return;
+    const uploaded: Attachment[] = [];
+    for (const file of files) {
+      if (!supabase || !userId) {
+        uploaded.push({ id: crypto.randomUUID(), name: file.name, size: formatBytes(file.size), mimeType: file.type, file });
+        continue;
+      }
+      const id = crypto.randomUUID();
+      const storagePath = `${userId}/${activeNote.id}/${id}-${file.name}`;
+      const upload = await supabase.storage.from("knowledge-attachments").upload(storagePath, file, { upsert: false });
+      if (upload.error) {
+        setSaveError(upload.error.message);
+        continue;
+      }
+      const { error } = await supabase.from("attachments").insert({
+        id,
+        user_id: userId,
+        note_id: activeNote.id,
+        storage_path: storagePath,
+        file_name: file.name,
+        mime_type: file.type || null,
+        file_size: file.size,
+      });
+      if (error) {
+        await supabase.storage.from("knowledge-attachments").remove([storagePath]);
+        setSaveError(error.message);
+        continue;
+      }
+      uploaded.push({ id, name: file.name, size: formatBytes(file.size), storagePath, mimeType: file.type || undefined });
+    }
+    if (uploaded.length) {
+      setNotes((current) => current.map((note) => note.id === activeNote.id ? { ...note, attachments: [...note.attachments, ...uploaded] } : note));
+      setSaved(true);
+    }
+  };
+
+  const removeAttachment = async (attachment: Attachment) => {
+    if (!activeNote) return;
+    if (supabase && userId && attachment.storagePath) {
+      const storageResult = await supabase.storage.from("knowledge-attachments").remove([attachment.storagePath]);
+      const { error } = await supabase.from("attachments").delete().eq("id", attachment.id).eq("user_id", userId);
+      if (storageResult.error || error) {
+        setSaveError(storageResult.error?.message || error?.message || "Attachment could not be removed.");
+        return;
+      }
+    }
+    setNotes((current) => current.map((note) => note.id === activeNote.id ? { ...note, attachments: note.attachments.filter((item) => item.id !== attachment.id) } : note));
+    setSaved(true);
+  };
+
+  const openAttachment = async (attachment: Attachment) => {
+    if (attachment.file) {
+      window.open(URL.createObjectURL(attachment.file), "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (!supabase || !attachment.storagePath) return;
+    const { data, error } = await supabase.storage.from("knowledge-attachments").createSignedUrl(attachment.storagePath, 60);
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const handleEmailAuth = async (event: FormEvent<HTMLFormElement>, email: string, password: string) => {
@@ -131,6 +327,7 @@ function App() {
 
   if (!sessionReady) return <main className="loading-screen">Loading your private vault…</main>;
   if (!authenticated) return <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => undefined} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} locked />;
+  if (!workspaceReady || !activeNote) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
 
   return (
     <main className="app-shell">
@@ -156,7 +353,7 @@ function App() {
         {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
           <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star">✦</span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div><button className="load-more" onClick={createNote}><Plus size={14} /> Create a note</button></section>
 
-          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {saved ? "Saved locally" : "Unsaved changes"}</div><div className="editor-actions"><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> {folderMap.get(activeNote.folderId)?.name || "Notes"} <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <span key={tag}><Hash size={13} />{tag}</span>)}</div><textarea className="note-editor" value={activeNote.body} onChange={(event) => updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span><button aria-label={`Remove ${attachment.name}`} onClick={() => updateNote({ attachments: activeNote.attachments.filter((item) => item.id !== attachment.id) })}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
+          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${saved ? "is-saved" : ""}`}><span /> {saveError || (saved ? "Saved" : "Saving…")}</div><div className="editor-actions"><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> {folderMap.get(activeNote.folderId)?.name || "Notes"} <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <span key={tag}><Hash size={13} />{tag}</span>)}</div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
         </div>}
       </section>
       {showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} />}
