@@ -511,7 +511,7 @@ function App() {
       setSaveError(error.message);
       return false;
     }
-    setSaveError(null);
+    setSaveError("");
     return true;
   };
 
