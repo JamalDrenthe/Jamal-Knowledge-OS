@@ -198,35 +198,31 @@ function App() {
       }
     }
     const foldersById = new Map(nextFolders.map((folder) => [folder.id, folder]));
-    const jamalDrentheByParent = new Map(
-      nextFolders
-        .filter((folder) => folder.name === "Jamal Drenthe")
-        .map((folder) => [folder.parentId, folder]),
-    );
     const angelsMediateFolders = nextFolders.filter((folder) => folder.name === "Angels Mediate");
-    if (angelsMediateFolders.length && jamalDrentheByParent.size) {
+    if (angelsMediateFolders.length) {
       const legacyCompanyNames = new Set(["CloudiAudi", "CyberSec360", "Huasca", "In De Roos", "OpenCourse", "Overskilled"]);
-      const foldersToRepair = nextFolders.filter((folder) => {
-        if (!legacyCompanyNames.has(folder.name)) return false;
+      const foldersToRepair = nextFolders.flatMap((folder) => {
+        if (!legacyCompanyNames.has(folder.name)) return [];
         const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
-        return parent?.name === "Angels Mediate";
+        const targetParent = parent?.parentId ? foldersById.get(parent.parentId) : undefined;
+        return parent?.name === "Angels Mediate" && targetParent?.name === "Jamal Drenthe"
+          ? [{ folder, targetParent }]
+          : [];
       });
       if (foldersToRepair.length) {
-        const repairResults = await Promise.all(foldersToRepair.map((folder) => (
+        const repairResults = await Promise.all(foldersToRepair.map(({ folder, targetParent }) => (
           client.from("folders").update({
-            parent_id: jamalDrentheByParent.get(foldersById.get(folder.parentId || "")?.parentId)?.id || null,
+            parent_id: targetParent.id,
           }).eq("id", folder.id).eq("user_id", currentUserId)
         )));
         const repairError = repairResults.find((result) => result.error)?.error;
         if (repairError) {
           setSaveError(repairError.message);
         } else {
+          const repairTargets = new Map(foldersToRepair.map(({ folder, targetParent }) => [folder.id, targetParent]));
           nextFolders = nextFolders.map((folder) => {
-            const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
-            const repairedParent = parent?.name === "Angels Mediate"
-              ? jamalDrentheByParent.get(parent.parentId)
-              : undefined;
-            return repairedParent && legacyCompanyNames.has(folder.name)
+            const repairedParent = repairTargets.get(folder.id);
+            return repairedParent
               ? { ...folder, parentId: repairedParent.id }
               : folder;
           });
@@ -484,6 +480,7 @@ function App() {
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
     setSaved(false);
+    setSaveError("");
     if (supabase && userId) {
       const { error } = await supabase.from("folders").insert({
         id: folder.id,
