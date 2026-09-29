@@ -17,12 +17,12 @@ const importedFolderBlueprint: Array<{ name: string; parent: string | null; colo
   { name: "Bedrijven", parent: null, color: "violet" },
   { name: "Jamal Drenthe", parent: "Bedrijven", color: "violet" },
   { name: "Angels Mediate", parent: "Jamal Drenthe", color: "blue" },
-  { name: "CloudiAudi", parent: "Angels Mediate", color: "blue" },
-  { name: "CyberSec360", parent: "Angels Mediate", color: "blue" },
-  { name: "Huasca", parent: "Angels Mediate", color: "blue" },
-  { name: "In De Roos", parent: "Angels Mediate", color: "blue" },
-  { name: "OpenCourse", parent: "Angels Mediate", color: "blue" },
-  { name: "Overskilled", parent: "Angels Mediate", color: "blue" },
+  { name: "CloudiAudi", parent: "Jamal Drenthe", color: "blue" },
+  { name: "CyberSec360", parent: "Jamal Drenthe", color: "blue" },
+  { name: "Huasca", parent: "Jamal Drenthe", color: "blue" },
+  { name: "In De Roos", parent: "Jamal Drenthe", color: "blue" },
+  { name: "OpenCourse", parent: "Jamal Drenthe", color: "blue" },
+  { name: "Overskilled", parent: "Jamal Drenthe", color: "blue" },
   { name: "Prompt DJ", parent: "Overskilled", color: "blue" },
   { name: "Speech Tool or Make The Conversation", parent: "Overskilled", color: "blue" },
   { name: "QuantumInitium", parent: "Jamal Drenthe", color: "mint" },
@@ -141,13 +141,14 @@ function App() {
   const pendingNoteChangesRef = useRef<Map<string, Partial<Note>>>(new Map());
 
   const loadWorkspace = async (currentUserId: string) => {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     setWorkspaceReady(false);
     setSaveError("");
     const [folderResult, noteResult, attachmentResult] = await Promise.all([
-      supabase.from("folders").select("id,name,parent_id,color,position").eq("user_id", currentUserId).order("position").order("created_at"),
-      supabase.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at,import_key").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
-      supabase.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
+      client.from("folders").select("id,name,parent_id,color,position").eq("user_id", currentUserId).order("position").order("created_at"),
+      client.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at,import_key").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
+      client.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
     ]);
     const firstError = folderResult.error || noteResult.error || attachmentResult.error;
     if (firstError) {
@@ -170,8 +171,8 @@ function App() {
       const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position }));
       const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false, import_key: note.importKey || null }));
       const [foldersInsert, notesInsert] = await Promise.all([
-        supabase.from("folders").insert(foldersToInsert),
-        supabase.from("notes").insert(notesToInsert),
+        client.from("folders").insert(foldersToInsert),
+        client.from("notes").insert(notesToInsert),
       ]);
       const seedError = foldersInsert.error || notesInsert.error;
       if (seedError) {
@@ -186,13 +187,49 @@ function App() {
         parent_id: parentId,
         position: nextFolders.length + index,
       }));
-      const { error } = await supabase.from("folders").insert(importedFolders);
+      const { error } = await client.from("folders").insert(importedFolders);
       if (!error) {
         const importedFolderItems = importedFolders.map(({ user_id: _userId, parent_id, ...folder }) => ({
           ...folder,
           parentId: parent_id,
         }));
         nextFolders = [...nextFolders, ...importedFolderItems];
+      }
+    }
+    const foldersById = new Map(nextFolders.map((folder) => [folder.id, folder]));
+    const jamalDrentheByParent = new Map(
+      nextFolders
+        .filter((folder) => folder.name === "Jamal Drenthe")
+        .map((folder) => [folder.parentId, folder]),
+    );
+    const angelsMediateFolders = nextFolders.filter((folder) => folder.name === "Angels Mediate");
+    if (angelsMediateFolders.length && jamalDrentheByParent.size) {
+      const legacyCompanyNames = new Set(["CloudiAudi", "CyberSec360", "Huasca", "In De Roos", "OpenCourse", "Overskilled"]);
+      const foldersToRepair = nextFolders.filter((folder) => {
+        if (!legacyCompanyNames.has(folder.name)) return false;
+        const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
+        return parent?.name === "Angels Mediate";
+      });
+      if (foldersToRepair.length) {
+        const repairResults = await Promise.all(foldersToRepair.map((folder) => (
+          client.from("folders").update({
+            parent_id: jamalDrentheByParent.get(foldersById.get(folder.parentId || "")?.parentId)?.id || null,
+          }).eq("id", folder.id).eq("user_id", currentUserId)
+        )));
+        const repairError = repairResults.find((result) => result.error)?.error;
+        if (repairError) {
+          setSaveError(repairError.message);
+        } else {
+          nextFolders = nextFolders.map((folder) => {
+            const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
+            const repairedParent = parent?.name === "Angels Mediate"
+              ? jamalDrentheByParent.get(parent.parentId)
+              : undefined;
+            return repairedParent && legacyCompanyNames.has(folder.name)
+              ? { ...folder, parentId: repairedParent.id }
+              : folder;
+          });
+        }
       }
     }
     const quantumFolder = nextFolders.find((folder) => (
@@ -223,7 +260,7 @@ function App() {
           favorite: false,
         }));
       if (missingImportedNotes.length) {
-        const { error: notesError } = await supabase.from("notes").upsert(
+        const { error: notesError } = await client.from("notes").upsert(
           missingImportedNotes,
           { onConflict: "user_id,import_key", ignoreDuplicates: true },
         );
@@ -231,7 +268,7 @@ function App() {
           setSaveError(notesError.message);
         } else {
           const importKeys = missingImportedNotes.map((note) => note.import_key);
-          const { data: importedNoteRows, error: importedNotesError } = await supabase
+          const { data: importedNoteRows, error: importedNotesError } = await client
             .from("notes")
             .select("id,title,body,folder_id,tags,favorite,updated_at,import_key")
             .eq("user_id", currentUserId)
@@ -438,6 +475,7 @@ function App() {
     const parentId = activeFolderId || null;
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
+    setSaved(false);
     if (supabase && userId) {
       const { error } = await supabase.from("folders").insert({
         id: folder.id,
@@ -449,17 +487,19 @@ function App() {
       });
       if (error) {
         setSaveError(error.message);
+        setSaved(false);
         return;
       }
     }
     setFolders((current) => [...current, folder]);
     if (parentId) setExpanded((current) => ({ ...current, [parentId]: true }));
     setActiveFolderId(folder.id);
+    setSaved(true);
   };
 
   const persistFolderPositions = async (nextFolders: FolderItem[]) => {
     const client = supabase;
-    if (!client || !userId) return;
+    if (!client || !userId) return true;
     const updates = nextFolders.map((folder) => client.from("folders").update({
       parent_id: folder.parentId,
       position: folder.position,
@@ -467,7 +507,12 @@ function App() {
     }).eq("id", folder.id).eq("user_id", userId));
     const results = await Promise.all(updates);
     const error = results.find((result) => result.error)?.error;
-    if (error) setSaveError(error.message);
+    if (error) {
+      setSaveError(error.message);
+      return false;
+    }
+    setSaveError("");
+    return true;
   };
 
   const moveFolderTo = async (folderId: string, parentId: string | null, targetIndex: number) => {
@@ -505,8 +550,8 @@ function App() {
     });
     setFolders(finalFolders);
     setSaved(false);
-    await persistFolderPositions(finalFolders);
-    setSaved(true);
+    const persisted = await persistFolderPositions(finalFolders);
+    setSaved(persisted);
   };
 
   const shiftFolder = async (folderId: string, delta: number) => {
