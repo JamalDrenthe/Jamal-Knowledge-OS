@@ -205,9 +205,13 @@ function MoreDots() {
 function GraphView() {
   return (
     <section className="graph-view">
-      <div className="graph-heading"><div><p className="eyebrow">Explore connections</p><h1>Knowledge graph</h1><p>See the ideas, projects and principles that shape your vault.</p></div><button className="new-note-button"><Plus size={17} /> Add connection</button></div>
+      <div className="graph-heading"><div><p className="eyebrow">Explore connections</p><h1>Knowledge graph</h1><p>See the ideas, projects and principles that shape your vault.</p></div><span className="graph-readonly"><Network size={15} /> Read-only map</span></div>
       <div className="graph-canvas">
-        <div className="graph-line line-one" /><div className="graph-line line-two" /><div className="graph-line line-three" />
+        <svg className="graph-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="50" y1="50" x2="19" y2="28" />
+          <line x1="50" y1="50" x2="23" y2="76" />
+          <line x1="50" y1="50" x2="77" y2="77" />
+        </svg>
         <div className="graph-node node-center"><BrainCircuit size={20} /><strong>Knowledge OS thesis</strong><span>4 connections</span></div>
         <div className="graph-node node-one"><span className="graph-node-dot blue" /><strong>Quantum Initium</strong><span>Strategy</span></div>
         <div className="graph-node node-two"><span className="graph-node-dot amber" /><strong>Build once, reuse</strong><span>Principles</span></div>
