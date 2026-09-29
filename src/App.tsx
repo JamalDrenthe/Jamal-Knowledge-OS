@@ -80,6 +80,7 @@ function App() {
   const [search, setSearch] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
   const [activeView, setActiveView] = useState("All notes");
+  const [workspaceView, setWorkspaceView] = useState<"notes" | "graph">("notes");
 
   const filteredNotes = useMemo(() => {
     const query = search.toLowerCase().trim();
@@ -115,16 +116,16 @@ function App() {
         </button>
 
         <nav className="side-nav" aria-label="Main navigation">
-          <NavItem icon={<LayoutGrid size={17} />} label="All notes" active={activeView === "All notes"} onClick={() => setActiveView("All notes")} count="24" />
+          <NavItem icon={<LayoutGrid size={17} />} label="All notes" active={workspaceView === "notes" && activeView === "All notes"} onClick={() => { setWorkspaceView("notes"); setActiveView("All notes"); }} count="24" />
           <NavItem icon={<Star size={17} />} label="Favorites" active={false} />
           <NavItem icon={<Archive size={17} />} label="Recently edited" active={false} />
           <div className="nav-label">Workspace</div>
-          <NavItem icon={<Folder size={17} />} label="Ideas" active={activeView === "Ideas"} onClick={() => setActiveView("Ideas")} count="8" />
-          <NavItem icon={<Folder size={17} />} label="Projects" active={activeView === "Projects"} onClick={() => setActiveView("Projects")} count="6" />
-          <NavItem icon={<Folder size={17} />} label="Principles" active={activeView === "Principles"} onClick={() => setActiveView("Principles")} count="4" />
-          <NavItem icon={<Folder size={17} />} label="Systems" active={activeView === "Systems"} onClick={() => setActiveView("Systems")} count="6" />
+          <NavItem icon={<Folder size={17} />} label="Ideas" active={workspaceView === "notes" && activeView === "Ideas"} onClick={() => { setWorkspaceView("notes"); setActiveView("Ideas"); }} count="8" />
+          <NavItem icon={<Folder size={17} />} label="Projects" active={workspaceView === "notes" && activeView === "Projects"} onClick={() => { setWorkspaceView("notes"); setActiveView("Projects"); }} count="6" />
+          <NavItem icon={<Folder size={17} />} label="Principles" active={workspaceView === "notes" && activeView === "Principles"} onClick={() => { setWorkspaceView("notes"); setActiveView("Principles"); }} count="4" />
+          <NavItem icon={<Folder size={17} />} label="Systems" active={workspaceView === "notes" && activeView === "Systems"} onClick={() => { setWorkspaceView("notes"); setActiveView("Systems"); }} count="6" />
           <div className="nav-label">Explore</div>
-          <NavItem icon={<Network size={17} />} label="Knowledge graph" />
+          <NavItem icon={<Network size={17} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
           <NavItem icon={<Tag size={17} />} label="Tags" />
         </nav>
 
@@ -150,7 +151,7 @@ function App() {
           </div>
         </header>
 
-        <div className="content-grid">
+        {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
           <section className="notes-panel">
             <div className="panel-heading">
               <div><p className="eyebrow">Your knowledge base</p><h1>{activeView}</h1></div>
@@ -187,7 +188,7 @@ function App() {
             </div>
             <footer className="editor-footer"><span><BookOpen size={14} /> Markdown</span><span>1,284 words</span><span>Private</span></footer>
           </article>
-        </div>
+        </div>}
       </section>
     </main>
   );
@@ -199,6 +200,26 @@ function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNod
 
 function MoreDots() {
   return <span className="more-dots"><i /><i /><i /></span>;
+}
+
+function GraphView() {
+  return (
+    <section className="graph-view">
+      <div className="graph-heading"><div><p className="eyebrow">Explore connections</p><h1>Knowledge graph</h1><p>See the ideas, projects and principles that shape your vault.</p></div><span className="graph-readonly"><Network size={15} /> Read-only map</span></div>
+      <div className="graph-canvas">
+        <svg className="graph-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="50" y1="50" x2="19" y2="28" />
+          <line x1="50" y1="50" x2="23" y2="76" />
+          <line x1="50" y1="50" x2="77" y2="77" />
+        </svg>
+        <div className="graph-node node-center"><BrainCircuit size={20} /><strong>Knowledge OS thesis</strong><span>4 connections</span></div>
+        <div className="graph-node node-one"><span className="graph-node-dot blue" /><strong>Quantum Initium</strong><span>Strategy</span></div>
+        <div className="graph-node node-two"><span className="graph-node-dot amber" /><strong>Build once, reuse</strong><span>Principles</span></div>
+        <div className="graph-node node-three"><span className="graph-node-dot mint" /><strong>AI-native rhythm</strong><span>Systems</span></div>
+      </div>
+      <div className="graph-footer"><span><Network size={15} /> 4 notes in this view</span><span><span className="legend-dot" />Ideas <span className="legend-dot blue-dot" />Projects <span className="legend-dot mint-dot" />Systems</span></div>
+    </section>
+  );
 }
 
 export default App;
