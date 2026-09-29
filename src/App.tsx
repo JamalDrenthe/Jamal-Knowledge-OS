@@ -1,25 +1,71 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive, ChevronDown, ChevronRight, File, FilePlus2, Folder, FolderPlus, Hash, LayoutGrid, Link2,
+  Archive, ChevronDown, ChevronRight, ChevronUp, File, FilePlus2, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
   LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Settings2, Sparkles, Sun, X,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
 type Theme = "light" | "dark";
-type FolderItem = { id: string; name: string; parentId: string | null; color: string };
+type FolderItem = { id: string; name: string; parentId: string | null; color: string; position: number };
 type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
   tags: string[]; favorite?: boolean; attachments: Attachment[];
 };
 
-const initialFolders: FolderItem[] = [
-  { id: "ideas", name: "Ideas", parentId: null, color: "violet" },
-  { id: "projects", name: "Projects", parentId: null, color: "blue" },
-  { id: "principles", name: "Principles", parentId: null, color: "amber" },
-  { id: "systems", name: "Systems", parentId: null, color: "mint" },
-  { id: "quantum", name: "Quantum Initium", parentId: "projects", color: "blue" },
+const importedFolderBlueprint: Array<{ name: string; parent: string | null; color: string }> = [
+  { name: "Bedrijven", parent: null, color: "violet" },
+  { name: "Jamal Drenthe", parent: "Bedrijven", color: "violet" },
+  { name: "Angels Mediate", parent: "Jamal Drenthe", color: "blue" },
+  { name: "CloudiAudi", parent: "Angels Mediate", color: "blue" },
+  { name: "CyberSec360", parent: "Angels Mediate", color: "blue" },
+  { name: "Huasca", parent: "Angels Mediate", color: "blue" },
+  { name: "In De Roos", parent: "Angels Mediate", color: "blue" },
+  { name: "OpenCourse", parent: "Angels Mediate", color: "blue" },
+  { name: "Overskilled", parent: "Angels Mediate", color: "blue" },
+  { name: "Prompt DJ", parent: "Overskilled", color: "blue" },
+  { name: "Speech Tool or Make The Conversation", parent: "Overskilled", color: "blue" },
+  { name: "QuantumInitium", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Afterstudenthousing", parent: "QuantumInitium", color: "mint" },
+  { name: "Boostplug", parent: "QuantumInitium", color: "mint" },
+  { name: "CRMos", parent: "QuantumInitium", color: "mint" },
+  { name: "Djobba", parent: "QuantumInitium", color: "mint" },
+  { name: "Immigratiepunt", parent: "QuantumInitium", color: "mint" },
+  { name: "Investbotiq", parent: "QuantumInitium", color: "mint" },
+  { name: "Logs Rent", parent: "Investbotiq", color: "mint" },
+  { name: "Spontiva", parent: "QuantumInitium", color: "mint" },
+  { name: "VVC", parent: "QuantumInitium", color: "mint" },
+  { name: "WoningVry", parent: "VVC", color: "mint" },
+  { name: "Xabi World", parent: "VVC", color: "mint" },
+  { name: "Zheavenzy", parent: "VVC", color: "mint" },
+  { name: "To-Do", parent: null, color: "amber" },
 ];
+
+const createImportedFolders = (idFactory: () => string): FolderItem[] => {
+  const ids = new Map<string, string>();
+  return importedFolderBlueprint.map((folder, index) => {
+    const id = idFactory();
+    ids.set(folder.name, id);
+    return {
+      id,
+      name: folder.name,
+      parentId: folder.parent ? ids.get(folder.parent) || null : null,
+      color: folder.color,
+      position: index,
+    };
+  });
+};
+
+const initialFolders: FolderItem[] = [
+  ...createImportedFolders(() => crypto.randomUUID()),
+  { id: "ideas", name: "Ideas", parentId: null, color: "violet", position: 25 },
+  { id: "projects", name: "Projects", parentId: null, color: "blue", position: 26 },
+  { id: "principles", name: "Principles", parentId: null, color: "amber", position: 27 },
+  { id: "systems", name: "Systems", parentId: null, color: "mint", position: 28 },
+  { id: "quantum", name: "Quantum Initium", parentId: "projects", color: "blue", position: 0 },
+];
+const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC", "Projects"]);
+const importedDocumentBlueprint = ["QuantumInitium Growth Engine (PDF)", "QuantumInitium"];
 
 const initialNotes: Note[] = [
   {
@@ -69,7 +115,7 @@ function App() {
   const [search, setSearch] = useState("");
   const [workspaceView, setWorkspaceView] = useState<"notes" | "graph">("notes");
   const [mobileNav, setMobileNav] = useState(false);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ projects: true });
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => Object.fromEntries(initialFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [sessionReady, setSessionReady] = useState(!supabase);
@@ -79,6 +125,8 @@ function App() {
   const [saveError, setSaveError] = useState("");
   const [authError, setAuthError] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; mode: "before" | "inside" | "after" } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadWorkspace = async (currentUserId: string) => {
@@ -86,7 +134,7 @@ function App() {
     setWorkspaceReady(false);
     setSaveError("");
     const [folderResult, noteResult, attachmentResult] = await Promise.all([
-      supabase.from("folders").select("id,name,parent_id,color").eq("user_id", currentUserId).order("created_at"),
+      supabase.from("folders").select("id,name,parent_id,color,position").eq("user_id", currentUserId).order("position").order("created_at"),
       supabase.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
       supabase.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
     ]);
@@ -96,18 +144,19 @@ function App() {
       setWorkspaceReady(true);
       return;
     }
-    let nextFolders = (folderResult.data || []).map((folder) => ({
+    let nextFolders = (folderResult.data || []).map((folder, index) => ({
       id: folder.id,
       name: folder.name,
       parentId: folder.parent_id,
       color: folder.color,
+      position: folder.position ?? index,
     }));
     let nextNotes = mapNotes(noteResult.data || [], attachmentResult.data || []);
     if (!nextFolders.length && !nextNotes.length) {
       const folderIds = new Map(initialFolders.map((folder) => [folder.id, crypto.randomUUID()]));
       nextFolders = initialFolders.map((folder) => ({ ...folder, id: folderIds.get(folder.id) || folder.id, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null }));
       nextNotes = initialNotes.map((note) => ({ ...note, id: crypto.randomUUID(), folderId: folderIds.get(note.folderId) || nextFolders[0].id }));
-      const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color }));
+      const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position }));
       const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false }));
       const [foldersInsert, notesInsert] = await Promise.all([
         supabase.from("folders").insert(foldersToInsert),
@@ -119,10 +168,51 @@ function App() {
         setWorkspaceReady(true);
         return;
       }
+    } else if (!nextFolders.some((folder) => folder.name === "Bedrijven")) {
+      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map((folder, index) => ({
+        ...folder,
+        user_id: currentUserId,
+        parent_id: folder.parentId,
+        position: nextFolders.length + index,
+      }));
+      const { error } = await supabase.from("folders").insert(importedFolders);
+      if (!error) {
+        const importedFolderItems = importedFolders.map(({ user_id: _userId, parent_id, ...folder }) => ({
+          ...folder,
+          parentId: parent_id,
+        }));
+        nextFolders = [...nextFolders, ...importedFolderItems];
+        const quantumFolder = importedFolderItems.find((folder) => folder.name === "QuantumInitium");
+        if (quantumFolder) {
+          const importedNotes = importedDocumentBlueprint.map((title) => ({
+            id: crypto.randomUUID(),
+            user_id: currentUserId,
+            folder_id: quantumFolder.id,
+            title,
+            body: "Imported from the Knowledge OS folder structure. Attach the original file here when it is available.",
+            tags: ["imported"],
+            favorite: false,
+          }));
+          const { error: notesError } = await supabase.from("notes").insert(importedNotes);
+          if (!notesError) {
+            nextNotes = [...nextNotes, ...importedNotes.map((note) => ({
+              id: note.id,
+              title: note.title,
+              body: note.body,
+              updated: "Just now",
+              folderId: note.folder_id,
+              tags: note.tags,
+              favorite: note.favorite,
+              attachments: [],
+            }))];
+          }
+        }
+      }
     }
     setFolders(nextFolders);
     setNotes(nextNotes);
     setActiveNoteId(nextNotes[0]?.id || "");
+    setExpanded(Object.fromEntries(nextFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
     setWorkspaceReady(true);
   };
 
@@ -228,7 +318,8 @@ function App() {
     const name = window.prompt("Naam van de nieuwe map");
     if (!name?.trim()) return;
     const parentId = activeFolderId || null;
-    const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet" };
+    const siblingCount = folders.filter((item) => item.parentId === parentId).length;
+    const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
     if (supabase && userId) {
       const { error } = await supabase.from("folders").insert({
         id: folder.id,
@@ -236,6 +327,7 @@ function App() {
         name: folder.name,
         parent_id: folder.parentId,
         color: folder.color,
+        position: folder.position,
       });
       if (error) {
         setSaveError(error.message);
@@ -245,6 +337,103 @@ function App() {
     setFolders((current) => [...current, folder]);
     if (parentId) setExpanded((current) => ({ ...current, [parentId]: true }));
     setActiveFolderId(folder.id);
+  };
+
+  const persistFolderPositions = async (nextFolders: FolderItem[]) => {
+    const client = supabase;
+    if (!client || !userId) return;
+    const updates = nextFolders.map((folder) => client.from("folders").update({
+      parent_id: folder.parentId,
+      position: folder.position,
+      updated_at: new Date().toISOString(),
+    }).eq("id", folder.id).eq("user_id", userId));
+    const results = await Promise.all(updates);
+    const error = results.find((result) => result.error)?.error;
+    if (error) setSaveError(error.message);
+  };
+
+  const moveFolderTo = async (folderId: string, parentId: string | null, targetIndex: number) => {
+    const moving = folders.find((folder) => folder.id === folderId);
+    if (!moving || parentId === folderId) return;
+    const descendants = new Set<string>();
+    const collectDescendants = (currentId: string) => {
+      folders.filter((folder) => folder.parentId === currentId).forEach((child) => {
+        descendants.add(child.id);
+        collectDescendants(child.id);
+      });
+    };
+    collectDescendants(folderId);
+    if (parentId && descendants.has(parentId)) return;
+
+    const withoutMoving = folders.filter((folder) => folder.id !== folderId);
+    const targetSiblings = withoutMoving
+      .filter((folder) => folder.parentId === parentId)
+      .sort((a, b) => a.position - b.position);
+    const boundedIndex = Math.max(0, Math.min(targetIndex, targetSiblings.length));
+    targetSiblings.splice(boundedIndex, 0, { ...moving, parentId });
+    const positionById = new Map(targetSiblings.map((folder, index) => [folder.id, index]));
+    const nextFolders = withoutMoving.map((folder) => {
+      const position = positionById.get(folder.id);
+      return position === undefined ? folder : { ...folder, position };
+    });
+    const movedFolder = { ...moving, parentId, position: boundedIndex };
+    nextFolders.push(movedFolder);
+    const normalized = nextFolders
+      .map((folder) => ({ ...folder }))
+      .sort((a, b) => a.position - b.position);
+    const finalFolders = normalized.map((folder) => {
+      const siblings = normalized.filter((candidate) => candidate.parentId === folder.parentId);
+      return { ...folder, position: siblings.findIndex((candidate) => candidate.id === folder.id) };
+    });
+    setFolders(finalFolders);
+    setSaved(false);
+    await persistFolderPositions(finalFolders);
+    setSaved(true);
+  };
+
+  const shiftFolder = async (folderId: string, delta: number) => {
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return;
+    const siblings = folders.filter((item) => item.parentId === folder.parentId).sort((a, b) => a.position - b.position);
+    const currentIndex = siblings.findIndex((item) => item.id === folderId);
+    const targetIndex = currentIndex + delta;
+    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+    await moveFolderTo(folderId, folder.parentId, targetIndex);
+  };
+
+  const handleFolderDragOver = (event: React.DragEvent<HTMLDivElement>, folderId: string) => {
+    event.preventDefault();
+    if (!draggedFolderId || draggedFolderId === folderId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const relativePosition = (event.clientY - bounds.top) / bounds.height;
+    const mode = relativePosition < 0.3 ? "before" : relativePosition > 0.7 ? "after" : "inside";
+    setDropTarget({ id: folderId, mode });
+  };
+
+  const handleFolderDrop = async (event: React.DragEvent<HTMLDivElement>, folderId: string) => {
+    event.preventDefault();
+    const target = folders.find((folder) => folder.id === folderId);
+    const moving = folders.find((folder) => folder.id === draggedFolderId);
+    const mode = dropTarget?.id === folderId ? dropTarget.mode : "inside";
+    setDraggedFolderId(null);
+    setDropTarget(null);
+    if (!target || !moving || moving.id === target.id) return;
+    const targetSiblings = folders.filter((folder) => folder.parentId === (mode === "inside" ? target.id : target.parentId)).sort((a, b) => a.position - b.position);
+    const targetIndex = mode === "before"
+      ? targetSiblings.findIndex((folder) => folder.id === target.id)
+      : mode === "after"
+        ? targetSiblings.findIndex((folder) => folder.id === target.id) + 1
+        : targetSiblings.length;
+    const movingIndex = folders
+      .filter((folder) => folder.parentId === moving.parentId)
+      .sort((a, b) => a.position - b.position)
+      .findIndex((folder) => folder.id === moving.id);
+    const destinationParent = mode === "inside" ? target.id : target.parentId;
+    const adjustedTargetIndex = moving.parentId === destinationParent && movingIndex < targetIndex
+      ? targetIndex - 1
+      : targetIndex;
+    await moveFolderTo(moving.id, destinationParent, adjustedTargetIndex);
+    if (mode === "inside") setExpanded((current) => ({ ...current, [target.id]: true }));
   };
 
   const addAttachments = (event: ChangeEvent<HTMLInputElement>) => {
@@ -361,7 +550,7 @@ function App() {
           <NavItem icon={<LayoutGrid size={16} />} label="All notes" active={workspaceView === "notes" && !activeFolderId} onClick={() => { setActiveFolderId(null); setWorkspaceView("notes"); }} count={String(notes.length)} />
           <NavItem icon={<Archive size={16} />} label="Recently edited" onClick={() => setWorkspaceView("notes")} />
           <div className="nav-label">Folders</div>
-          {folders.filter((folder) => !folder.parentId).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setWorkspaceView("notes"); }} />)}
+          {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} />)}
           <div className="nav-label">Explore</div>
           <NavItem icon={<Network size={16} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
           <NavItem icon={<Hash size={16} />} label="Tags" />
@@ -383,9 +572,10 @@ function App() {
   );
 }
 
-function FolderTree({ folder, folders, activeFolderId, expanded, onToggle, onSelect }: { folder: FolderItem; folders: FolderItem[]; activeFolderId: string | null; expanded: Record<string, boolean>; onToggle: (id: string) => void; onSelect: (id: string) => void }) {
-  const children = folders.filter((item) => item.parentId === folder.id);
-  return <div className="folder-tree"><button className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`} onClick={() => onSelect(folder.id)}><span>{children.length ? <span className="tree-toggle" onClick={(event) => { event.stopPropagation(); onToggle(folder.id); }}>{expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span> : <span className="tree-spacer" />}<Folder size={16} />{folder.name}</span><small>{children.length || ""}</small></button>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} onToggle={onToggle} onSelect={onSelect} /></div>)}</div>;
+function FolderTree({ folder, folders, activeFolderId, expanded, dropTarget, onToggle, onSelect, onShift, onDragStart, onDragOver, onDrop }: { folder: FolderItem; folders: FolderItem[]; activeFolderId: string | null; expanded: Record<string, boolean>; dropTarget: { id: string; mode: "before" | "inside" | "after" } | null; onToggle: (id: string) => void; onSelect: (id: string) => void; onShift: (id: string, delta: number) => void; onDragStart: (id: string) => void; onDragOver: (event: React.DragEvent<HTMLDivElement>, id: string) => void; onDrop: (event: React.DragEvent<HTMLDivElement>, id: string) => void }) {
+  const children = folders.filter((item) => item.parentId === folder.id).sort((a, b) => a.position - b.position);
+  const dropMode = dropTarget?.id === folder.id ? dropTarget.mode : "";
+  return <div className="folder-tree"><div className={`folder-drop-row ${dropMode ? `drop-${dropMode}` : ""}`} draggable onDragStart={() => onDragStart(folder.id)} onDragOver={(event) => onDragOver(event, folder.id)} onDrop={(event) => void onDrop(event, folder.id)}><div className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`}><button className="folder-select" onClick={() => onSelect(folder.id)}><span><span className="tree-toggle" onClick={(event) => { event.stopPropagation(); if (children.length) onToggle(folder.id); }}>{children.length ? (expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span className="tree-spacer" />}</span><Folder size={16} />{folder.name}</span></button><span className="folder-row-actions"><button className="folder-move-button" onClick={(event) => { event.stopPropagation(); void onShift(folder.id, -1); }} aria-label={`Move ${folder.name} up`}><ChevronUp size={12} /></button><button className="folder-move-button" onClick={(event) => { event.stopPropagation(); void onShift(folder.id, 1); }} aria-label={`Move ${folder.name} down`}><ChevronDown size={12} /></button><GripVertical className="folder-drag-handle" size={14} aria-hidden="true" /></span></div></div>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={onToggle} onSelect={onSelect} onShift={onShift} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} /></div>)}</div>;
 }
 
 function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, error, locked = false }: { mode: "login" | "register"; setMode: (mode: "login" | "register") => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>, email: string, password: string) => void; onGoogle: () => void; error?: string; locked?: boolean }) {
