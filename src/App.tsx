@@ -143,6 +143,7 @@ function App() {
   const saveTimerRef = useRef<number | null>(null);
   const pendingNoteChangesRef = useRef<Map<string, Partial<Note>>>(new Map());
   const saveGenerationRef = useRef(0);
+  const authGenerationRef = useRef(0);
   const loadedWorkspaceUserRef = useRef<string | null>(null);
 
   const invalidatePendingNoteSaves = () => {
@@ -154,9 +155,9 @@ function App() {
     setNoteSaveErrors({});
   };
 
-  const loadWorkspace = async (currentUserId: string) => {
+  const loadWorkspace = async (currentUserId: string, authGeneration: number): Promise<boolean> => {
     const client = supabase;
-    if (!client) return;
+    if (!client || authGeneration !== authGenerationRef.current) return false;
     invalidatePendingNoteSaves();
     setWorkspaceReady(false);
     setSaveError("");
@@ -167,9 +168,10 @@ function App() {
     ]);
     const firstError = folderResult.error || noteResult.error || attachmentResult.error;
     if (firstError) {
+      if (authGeneration !== authGenerationRef.current) return false;
       setSaveError(firstError.message);
       setWorkspaceReady(true);
-      return;
+      return false;
     }
     let nextFolders = (folderResult.data || []).map((folder, index) => ({
       id: folder.id,
@@ -191,9 +193,10 @@ function App() {
       ]);
       const seedError = foldersInsert.error || notesInsert.error;
       if (seedError) {
+        if (authGeneration !== authGenerationRef.current) return false;
         setSaveError(seedError.message);
         setWorkspaceReady(true);
-        return;
+        return false;
       }
     } else if (!nextFolders.some((folder) => folder.name === "Bedrijven")) {
       const importedFolders = createImportedFolders(() => crypto.randomUUID()).map(({ parentId, ...folder }, index) => ({
@@ -297,11 +300,13 @@ function App() {
         }
       }
     }
+    if (authGeneration !== authGenerationRef.current) return false;
     setFolders(nextFolders);
     setNotes(nextNotes);
     setActiveNoteId(nextNotes[0]?.id || "");
     setExpanded(Object.fromEntries(nextFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
     setWorkspaceReady(true);
+    return true;
   };
 
   const verifyAccess = async (currentUserId: string) => {
@@ -348,28 +353,35 @@ function App() {
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
+    const loadWorkspaceForUser = async (currentUserId: string, authGeneration: number) => {
+      if (authGeneration !== authGenerationRef.current || loadedWorkspaceUserRef.current === currentUserId) return;
+      loadedWorkspaceUserRef.current = currentUserId;
+      const loaded = await loadWorkspace(currentUserId, authGeneration);
+      if (!loaded && loadedWorkspaceUserRef.current === currentUserId) {
+        loadedWorkspaceUserRef.current = null;
+      }
+    };
     const loadSession = async () => {
+      const authGeneration = authGenerationRef.current;
       const { data } = await client.auth.getSession();
       const hasAccess = data.session ? await verifyAccess(data.session.user.id) : false;
+      if (authGeneration !== authGenerationRef.current) return;
       setAuthenticated(Boolean(data.session && hasAccess));
       setUserId(data.session && hasAccess ? data.session.user.id : null);
       setSessionReady(true);
       if (data.session && hasAccess) {
-        loadedWorkspaceUserRef.current = data.session.user.id;
-        await loadWorkspace(data.session.user.id);
+        await loadWorkspaceForUser(data.session.user.id, authGeneration);
       }
     };
-    void loadSession();
     const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
+      const authGeneration = ++authGenerationRef.current;
       setSessionReady(true);
       const hasAccess = nextSession ? await verifyAccess(nextSession.user.id) : false;
+      if (authGeneration !== authGenerationRef.current) return;
       setAuthenticated(Boolean(nextSession && hasAccess));
       setUserId(nextSession && hasAccess ? nextSession.user.id : null);
       if (nextSession && hasAccess) {
-        if (loadedWorkspaceUserRef.current !== nextSession.user.id) {
-          loadedWorkspaceUserRef.current = nextSession.user.id;
-          await loadWorkspace(nextSession.user.id);
-        }
+        await loadWorkspaceForUser(nextSession.user.id, authGeneration);
       } else {
         loadedWorkspaceUserRef.current = null;
         invalidatePendingNoteSaves();
@@ -378,6 +390,7 @@ function App() {
         setWorkspaceReady(true);
       }
     });
+    void loadSession();
     return () => listener.subscription.unsubscribe();
   }, []);
 
