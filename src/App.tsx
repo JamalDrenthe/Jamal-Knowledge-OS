@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive, ChevronDown, ChevronRight, ChevronUp, Clock3, File, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
   LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Sparkles, Star, Sun, Tag, X,
@@ -319,6 +319,7 @@ function App() {
       }
       if (modifier && event.key.toLowerCase() === "n") {
         event.preventDefault();
+        setCommandPaletteOpen(false);
         void createNote();
       }
       if (event.key === "Escape") {
@@ -759,11 +760,32 @@ function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNod
 }
 
 function CommandPalette({ onClose, onNewNote, onNewFolder, onAllNotes, onFavorites, onRecent, onGraph, onToggleTheme }: { onClose: () => void; onNewNote: () => void; onNewFolder: () => void; onAllNotes: () => void; onFavorites: () => void; onRecent: () => void; onGraph: () => void; onToggleTheme: () => void }) {
-  return <div className="command-backdrop" role="presentation" onMouseDown={onClose}><section className="command-palette" role="dialog" aria-modal="true" aria-labelledby="command-title" onMouseDown={(event) => event.stopPropagation()}><div className="command-heading"><div><p className="eyebrow">Quick actions</p><h2 id="command-title">What do you want to do?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close quick actions"><X size={17} /></button></div><div className="command-list"><CommandAction icon={<Plus size={16} />} label="New note" shortcut="Ctrl N" onClick={onNewNote} /><CommandAction icon={<FolderPlus size={16} />} label="New folder" onClick={onNewFolder} /><CommandAction icon={<LayoutGrid size={16} />} label="Show all notes" onClick={onAllNotes} /><CommandAction icon={<Star size={16} />} label="Show favorites" onClick={onFavorites} /><CommandAction icon={<Clock3 size={16} />} label="Show recently edited" onClick={onRecent} /><CommandAction icon={<Network size={16} />} label="Open knowledge graph" onClick={onGraph} /><CommandAction icon={<Moon size={16} />} label="Toggle appearance" onClick={onToggleTheme} /></div><p className="command-hint">Press Esc to close</p></section></div>;
+  const dialogRef = useRef<HTMLElement>(null);
+  const firstActionRef = useRef<HTMLButtonElement>(null);
+
+  useLayoutEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    firstActionRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])") || []);
+    if (!focusable.length) return;
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.shiftKey
+      ? currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1
+      : currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+    event.preventDefault();
+    focusable[nextIndex]?.focus();
+  };
+
+  return <div className="command-backdrop" role="presentation" onMouseDown={onClose}><section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby="command-title" onKeyDown={handleKeyDown} onMouseDown={(event) => event.stopPropagation()}><div className="command-heading"><div><p className="eyebrow">Quick actions</p><h2 id="command-title">What do you want to do?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close quick actions"><X size={17} /></button></div><div className="command-list"><CommandAction buttonRef={firstActionRef} icon={<Plus size={16} />} label="New note" shortcut="Ctrl N" onClick={onNewNote} /><CommandAction icon={<FolderPlus size={16} />} label="New folder" onClick={onNewFolder} /><CommandAction icon={<LayoutGrid size={16} />} label="Show all notes" onClick={onAllNotes} /><CommandAction icon={<Star size={16} />} label="Show favorites" onClick={onFavorites} /><CommandAction icon={<Clock3 size={16} />} label="Show recently edited" onClick={onRecent} /><CommandAction icon={<Network size={16} />} label="Open knowledge graph" onClick={onGraph} /><CommandAction icon={<Moon size={16} />} label="Toggle appearance" onClick={onToggleTheme} /></div><p className="command-hint">Press Esc to close</p></section></div>;
 }
 
-function CommandAction({ icon, label, shortcut, onClick }: { icon: React.ReactNode; label: string; shortcut?: string; onClick: () => void }) {
-  return <button className="command-action" onClick={onClick}><span>{icon}{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
+function CommandAction({ buttonRef, icon, label, shortcut, onClick }: { buttonRef?: React.RefObject<HTMLButtonElement | null>; icon: React.ReactNode; label: string; shortcut?: string; onClick: () => void }) {
+  return <button ref={buttonRef} className="command-action" onClick={onClick}><span>{icon}{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
 }
 
 function GraphView() {
