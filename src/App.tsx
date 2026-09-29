@@ -145,6 +145,7 @@ function App() {
   const saveGenerationRef = useRef(0);
   const authGenerationRef = useRef(0);
   const authenticatedUserRef = useRef<string | null>(null);
+  const pendingAuthUserRef = useRef<string | null>(null);
   const loadedWorkspaceUserRef = useRef<string | null>(null);
   const workspaceLoadTokenRef = useRef(0);
   const activeWorkspaceLoadRef = useRef<{ userId: string; token: number } | null>(null);
@@ -356,6 +357,16 @@ function App() {
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
+    const commitAuthIdentity = (currentUserId: string | null) => {
+      if (authenticatedUserRef.current === currentUserId) return;
+      authenticatedUserRef.current = currentUserId;
+      pendingAuthUserRef.current = currentUserId;
+      if (loadedWorkspaceUserRef.current !== currentUserId) {
+        activeWorkspaceLoadRef.current = null;
+        workspaceLoadTokenRef.current += 1;
+        loadedWorkspaceUserRef.current = null;
+      }
+    };
     const loadWorkspaceForUser = async (currentUserId: string, authGeneration: number) => {
       if (
         authGeneration !== authGenerationRef.current
@@ -380,13 +391,7 @@ function App() {
       const hasAccess = data.session ? await verifyAccess(data.session.user.id) : false;
       if (authGeneration !== authGenerationRef.current) return;
       const currentUserId = data.session && hasAccess ? data.session.user.id : null;
-      if (authenticatedUserRef.current !== currentUserId) {
-        authenticatedUserRef.current = currentUserId;
-        authGenerationRef.current += 1;
-        activeWorkspaceLoadRef.current = null;
-        workspaceLoadTokenRef.current += 1;
-        loadedWorkspaceUserRef.current = null;
-      }
+      commitAuthIdentity(currentUserId);
       const currentAuthGeneration = authGenerationRef.current;
       setAuthenticated(Boolean(data.session && hasAccess));
       setUserId(currentUserId);
@@ -397,20 +402,18 @@ function App() {
     };
     const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
       const nextUserId = nextSession?.user.id || null;
-      if (authenticatedUserRef.current !== nextUserId) {
-        authenticatedUserRef.current = nextUserId;
+      if (pendingAuthUserRef.current !== nextUserId) {
+        pendingAuthUserRef.current = nextUserId;
         authGenerationRef.current += 1;
-        activeWorkspaceLoadRef.current = null;
-        workspaceLoadTokenRef.current += 1;
-        loadedWorkspaceUserRef.current = null;
       }
       const authGeneration = authGenerationRef.current;
       setSessionReady(true);
       const hasAccess = nextSession ? await verifyAccess(nextSession.user.id) : false;
       if (authGeneration !== authGenerationRef.current) return;
-      if (!hasAccess) authenticatedUserRef.current = null;
-      setAuthenticated(Boolean(nextSession && hasAccess));
-      setUserId(nextSession && hasAccess ? nextSession.user.id : null);
+      const currentUserId = nextSession && hasAccess ? nextSession.user.id : null;
+      commitAuthIdentity(currentUserId);
+      setAuthenticated(Boolean(currentUserId));
+      setUserId(currentUserId);
       if (nextSession && hasAccess) {
         await loadWorkspaceForUser(nextSession.user.id, authGeneration);
       } else {
