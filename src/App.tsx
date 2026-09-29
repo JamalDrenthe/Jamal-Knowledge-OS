@@ -385,6 +385,7 @@ function App() {
         authGenerationRef.current += 1;
         activeWorkspaceLoadRef.current = null;
         workspaceLoadTokenRef.current += 1;
+        loadedWorkspaceUserRef.current = null;
       }
       const currentAuthGeneration = authGenerationRef.current;
       setAuthenticated(Boolean(data.session && hasAccess));
@@ -401,6 +402,7 @@ function App() {
         authGenerationRef.current += 1;
         activeWorkspaceLoadRef.current = null;
         workspaceLoadTokenRef.current += 1;
+        loadedWorkspaceUserRef.current = null;
       }
       const authGeneration = authGenerationRef.current;
       setSessionReady(true);
