@@ -111,6 +111,38 @@ function isDescendantFolder(folderId: string, selectedFolderId: string, folderMa
   return false;
 }
 
+function deduplicateFolders(folders: FolderItem[]) {
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
+  const canonicalById = new Map<string, string>();
+  const canonicalByKey = new Map<string, string>();
+  const normalizedFolders: FolderItem[] = [];
+
+  const resolve = (folderId: string, visiting = new Set<string>()): string | null => {
+    const knownCanonical = canonicalById.get(folderId);
+    if (knownCanonical) return knownCanonical;
+    const folder = foldersById.get(folderId);
+    if (!folder || visiting.has(folderId)) return null;
+    visiting.add(folderId);
+    const parentId = folder.parentId ? resolve(folder.parentId, visiting) : null;
+    const key = `${parentId || "root"}::${folder.name.trim().toLocaleLowerCase()}`;
+    const existingId = canonicalByKey.get(key);
+    if (existingId) {
+      canonicalById.set(folderId, existingId);
+      return existingId;
+    }
+    canonicalByKey.set(key, folder.id);
+    canonicalById.set(folderId, folder.id);
+    normalizedFolders.push({ ...folder, name: folder.name.trim(), parentId });
+    return folder.id;
+  };
+
+  [...folders].sort((a, b) => a.position - b.position).forEach((folder) => resolve(folder.id));
+  return {
+    folders: normalizedFolders,
+    duplicateMap: new Map([...canonicalById].filter(([id, canonicalId]) => id !== canonicalId)),
+  };
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("knowledge-os-theme") as Theme) || "light");
   const [folders, setFolders] = useState<FolderItem[]>(supabase ? [] : initialFolders);
@@ -249,6 +281,38 @@ function App() {
           });
         }
       }
+    }
+    const { folders: deduplicatedFolders, duplicateMap } = deduplicateFolders(nextFolders);
+    if (duplicateMap.size) {
+      const duplicateIds = [...duplicateMap.keys()];
+      const childUpdates = await Promise.all(duplicateIds.map((duplicateId) => (
+        client.from("folders")
+          .update({ parent_id: duplicateMap.get(duplicateId) || null })
+          .eq("parent_id", duplicateId)
+          .eq("user_id", currentUserId)
+      )));
+      const noteUpdates = await Promise.all(duplicateIds.map((duplicateId) => (
+        client.from("notes")
+          .update({ folder_id: duplicateMap.get(duplicateId) || null })
+          .eq("folder_id", duplicateId)
+          .eq("user_id", currentUserId)
+      )));
+      const deleteResults = await Promise.all(duplicateIds.map((duplicateId) => (
+        client.from("folders").delete().eq("id", duplicateId).eq("user_id", currentUserId)
+      )));
+      const dedupeError = [...childUpdates, ...noteUpdates, ...deleteResults].find((result) => result.error)?.error;
+      if (dedupeError) {
+        setSaveError(dedupeError.message);
+      } else {
+        const movedNotes = new Map(duplicateMap);
+        nextFolders = deduplicatedFolders;
+        nextNotes = nextNotes.map((note) => ({
+          ...note,
+          folderId: movedNotes.get(note.folderId) || note.folderId,
+        }));
+      }
+    } else {
+      nextFolders = deduplicatedFolders;
     }
     const quantumFolder = nextFolders.find((folder) => (
       folder.name === "QuantumInitium"
