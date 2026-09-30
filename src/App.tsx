@@ -138,22 +138,22 @@ function inferImportedFolderKey(
   if (!blueprint || folder.color !== blueprint.color) return undefined;
   const foldersById = new Map(folders.map((item) => [item.id, item]));
   if (blueprint.parent === null) return folder.parentId === null ? importedFolderKey(folder.name) : undefined;
-  let parentId = folder.parentId;
-  const ancestorIds = new Set<string>();
-  while (parentId && !ancestorIds.has(parentId)) {
-    ancestorIds.add(parentId);
-    const parent = foldersById.get(parentId);
-    if (!parent) return undefined;
-    const parentImportKey: string | undefined = inferImportedFolderKey(
-      parent,
-      folders,
-      new Set([...visiting, folder.id]),
-    );
-    if (parentImportKey === importedFolderKey(blueprint.parent)) {
-      return importedFolderKey(folder.name);
-    }
-    parentId = parent.parentId;
+  const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
+  if (!parent) return undefined;
+  const parentImportKey: string | undefined = inferImportedFolderKey(
+    parent,
+    folders,
+    new Set([...visiting, folder.id]),
+  );
+  if (parentImportKey === importedFolderKey(blueprint.parent)) {
+    return importedFolderKey(folder.name);
   }
+  if (blueprint.parent !== "Jamal Drenthe" || folderNameKey(parent.name) !== "angelsmediate") return undefined;
+  const grandparent = parent.parentId ? foldersById.get(parent.parentId) : undefined;
+  const grandparentImportKey = grandparent
+    ? inferImportedFolderKey(grandparent, folders, new Set([...visiting, folder.id, parent.id]))
+    : undefined;
+  if (grandparentImportKey === importedFolderKey(blueprint.parent)) return importedFolderKey(folder.name);
   return undefined;
 }
 
@@ -225,7 +225,13 @@ function deduplicateFolders(folders: FolderItem[]) {
   const sortPriority = (folder: FolderItem) => {
     const pathKey = getPathKey(folder.id);
     const isCompanyFolder = pathKey === "bedrijven/jamaldrenthe" || pathKey.startsWith("bedrijven/jamaldrenthe/");
-    return [isCompanyFolder ? 0 : 1, folder.position, folder.id] as const;
+    const blueprint = importedFolderBlueprint.find(
+      (item) => importedFolderKey(item.name) === folder.importKey,
+    );
+    const hasExpectedParent = blueprint?.parent
+      ? foldersById.get(folder.parentId || "")?.importKey === importedFolderKey(blueprint.parent)
+      : folder.parentId === null;
+    return [hasExpectedParent ? 0 : 1, isCompanyFolder ? 0 : 1, folder.position, folder.id] as const;
   };
   const getDeduplicationKey = (folder: FolderItem) => (
     folder.importKey || `${getPathKey(folder.id)}:${folderNameKey(folder.name)}`
@@ -263,9 +269,13 @@ function deduplicateFolders(folders: FolderItem[]) {
 
   [...folders].sort((a, b) => {
     const depthDifference = getDepth(a) - getDepth(b);
-    const [aCompany, aPosition, aId] = sortPriority(a);
-    const [bCompany, bPosition, bId] = sortPriority(b);
-    return depthDifference || aCompany - bCompany || aPosition - bPosition || aId.localeCompare(bId);
+    const [aCanonical, aCompany, aPosition, aId] = sortPriority(a);
+    const [bCanonical, bCompany, bPosition, bId] = sortPriority(b);
+    return depthDifference
+      || aCanonical - bCanonical
+      || aCompany - bCompany
+      || aPosition - bPosition
+      || aId.localeCompare(bId);
   }).forEach((folder) => resolve(folder.id));
   return {
     folders: normalizedFolders,
@@ -392,7 +402,16 @@ function App() {
       }
     }
     nextFolders = markLegacyImportedFolders(nextFolders);
-    const legacyImportKeyUpdates = nextFolders.filter((folder) => folder.importKey && !folderResult.data?.find((row) => row.id === folder.id)?.import_key);
+    const persistedImportKeys = new Set(
+      (folderResult.data || [])
+        .map((row) => row.import_key)
+        .filter((importKey): importKey is string => Boolean(importKey)),
+    );
+    const legacyImportKeyUpdates = nextFolders.filter((folder) => (
+      folder.importKey
+      && !folderResult.data?.find((row) => row.id === folder.id)?.import_key
+      && !persistedImportKeys.has(folder.importKey)
+    ));
     if (legacyImportKeyUpdates.length) {
       const legacyImportResults = await Promise.all(legacyImportKeyUpdates.map((folder) => (
         client.from("folders")
