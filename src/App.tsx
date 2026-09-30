@@ -62,7 +62,6 @@ const initialFolders: FolderItem[] = [
   { id: "projects", name: "Projects", parentId: null, color: "blue", position: 26 },
   { id: "principles", name: "Principles", parentId: null, color: "amber", position: 27 },
   { id: "systems", name: "Systems", parentId: null, color: "mint", position: 28 },
-  { id: "quantum", name: "Quantum Initium", parentId: "projects", color: "blue", position: 0 },
 ];
 const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC", "Projects"]);
 const importedDocumentBlueprint = [
@@ -111,11 +110,49 @@ function isDescendantFolder(folderId: string, selectedFolderId: string, folderMa
   return false;
 }
 
+function folderNameKey(name: string) {
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function canonicalFolderName(name: string) {
+  return folderNameKey(name) === "quantuminitium" ? "QuantumInitium" : name.trim();
+}
+
 function deduplicateFolders(folders: FolderItem[]) {
   const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
   const canonicalById = new Map<string, string>();
   const canonicalByKey = new Map<string, string>();
   const normalizedFolders: FolderItem[] = [];
+
+  const getPathKey = (folderId: string, visiting = new Set<string>()): string => {
+    const folder = foldersById.get(folderId);
+    if (!folder || visiting.has(folderId)) return "";
+    visiting.add(folderId);
+    const parentPath = folder.parentId ? getPathKey(folder.parentId, visiting) : "";
+    return [parentPath, folderNameKey(folder.name)].filter(Boolean).join("/");
+  };
+
+  const sortPriority = (folder: FolderItem) => {
+    const pathKey = getPathKey(folder.id);
+    const isCompanyFolder = pathKey === "bedrijven/jamaldrenthe" || pathKey.startsWith("bedrijven/jamaldrenthe/");
+    return [isCompanyFolder ? 0 : 1, folder.position, folder.id] as const;
+  };
+  const getDepth = (folder: FolderItem) => {
+    let depth = 0;
+    let parentId = folder.parentId;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      depth += 1;
+      parentId = foldersById.get(parentId)?.parentId || null;
+    }
+    return depth;
+  };
 
   const resolve = (folderId: string, visiting = new Set<string>()): string | null => {
     const knownCanonical = canonicalById.get(folderId);
@@ -124,7 +161,7 @@ function deduplicateFolders(folders: FolderItem[]) {
     if (!folder || visiting.has(folderId)) return null;
     visiting.add(folderId);
     const parentId = folder.parentId ? resolve(folder.parentId, visiting) : null;
-    const key = `${parentId || "root"}::${folder.name.trim().toLocaleLowerCase()}`;
+    const key = folderNameKey(folder.name);
     const existingId = canonicalByKey.get(key);
     if (existingId) {
       canonicalById.set(folderId, existingId);
@@ -132,15 +169,36 @@ function deduplicateFolders(folders: FolderItem[]) {
     }
     canonicalByKey.set(key, folder.id);
     canonicalById.set(folderId, folder.id);
-    normalizedFolders.push({ ...folder, name: folder.name.trim(), parentId });
+    normalizedFolders.push({ ...folder, name: canonicalFolderName(folder.name), parentId });
     return folder.id;
   };
 
-  [...folders].sort((a, b) => a.position - b.position).forEach((folder) => resolve(folder.id));
+  [...folders].sort((a, b) => {
+    const depthDifference = getDepth(a) - getDepth(b);
+    const [aCompany, aPosition, aId] = sortPriority(a);
+    const [bCompany, bPosition, bId] = sortPriority(b);
+    return depthDifference || aCompany - bCompany || aPosition - bPosition || aId.localeCompare(bId);
+  }).forEach((folder) => resolve(folder.id));
   return {
     folders: normalizedFolders,
     duplicateMap: new Map([...canonicalById].filter(([id, canonicalId]) => id !== canonicalId)),
   };
+}
+
+function rebalanceFolderPositions(folders: FolderItem[]) {
+  const foldersByParent = new Map<string, FolderItem[]>();
+  folders.forEach((folder) => {
+    const key = folder.parentId || "root";
+    foldersByParent.set(key, [...(foldersByParent.get(key) || []), folder]);
+  });
+  const order = new Map(folders.map((folder, index) => [folder.id, index]));
+  const positions = new Map<string, number>();
+  foldersByParent.forEach((siblings) => {
+    siblings
+      .sort((a, b) => a.position - b.position || (order.get(a.id) || 0) - (order.get(b.id) || 0))
+      .forEach((folder, index) => positions.set(folder.id, index));
+  });
+  return folders.map((folder) => ({ ...folder, position: positions.get(folder.id) || 0 }));
 }
 
 function App() {
@@ -220,7 +278,13 @@ function App() {
     if (!nextFolders.length && !nextNotes.length) {
       const folderIds = new Map(initialFolders.map((folder) => [folder.id, crypto.randomUUID()]));
       nextFolders = initialFolders.map((folder) => ({ ...folder, id: folderIds.get(folder.id) || folder.id, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null }));
-      nextNotes = initialNotes.map((note) => ({ ...note, id: crypto.randomUUID(), folderId: folderIds.get(note.folderId) || nextFolders[0].id }));
+      nextNotes = initialNotes.map((note) => ({
+        ...note,
+        id: crypto.randomUUID(),
+        folderId: folderIds.get(note.folderId)
+          || nextFolders.find((folder) => folder.name === "QuantumInitium")?.id
+          || nextFolders[0].id,
+      }));
       const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position }));
       const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false, import_key: note.importKey || null }));
       const [foldersInsert, notesInsert] = await Promise.all([
@@ -291,21 +355,48 @@ function App() {
           .eq("parent_id", duplicateId)
           .eq("user_id", currentUserId)
       )));
+      const childError = childUpdates.find((result) => result.error)?.error;
+      if (childError) {
+        setSaveError(`Submappen konden niet veilig worden samengevoegd: ${childError.message}`);
+        setWorkspaceReady(true);
+        return false;
+      }
       const noteUpdates = await Promise.all(duplicateIds.map((duplicateId) => (
         client.from("notes")
           .update({ folder_id: duplicateMap.get(duplicateId) || null })
           .eq("folder_id", duplicateId)
           .eq("user_id", currentUserId)
       )));
+      const noteError = noteUpdates.find((result) => result.error)?.error;
+      if (noteError) {
+        setSaveError(`Notities konden niet veilig worden verplaatst: ${noteError.message}`);
+        setWorkspaceReady(true);
+        return false;
+      }
+      const rebalancedFolders = rebalanceFolderPositions(deduplicatedFolders);
+      const positionUpdates = await Promise.all(rebalancedFolders.map((folder) => (
+        client.from("folders")
+          .update({ parent_id: folder.parentId, position: folder.position })
+          .eq("id", folder.id)
+          .eq("user_id", currentUserId)
+      )));
+      const positionError = positionUpdates.find((result) => result.error)?.error;
+      if (positionError) {
+        setSaveError(`De mapvolgorde kon niet veilig worden opgeslagen: ${positionError.message}`);
+        setWorkspaceReady(true);
+        return false;
+      }
       const deleteResults = await Promise.all(duplicateIds.map((duplicateId) => (
         client.from("folders").delete().eq("id", duplicateId).eq("user_id", currentUserId)
       )));
-      const dedupeError = [...childUpdates, ...noteUpdates, ...deleteResults].find((result) => result.error)?.error;
-      if (dedupeError) {
-        setSaveError(dedupeError.message);
+      const deleteError = deleteResults.find((result) => result.error)?.error;
+      if (deleteError) {
+        setSaveError(`Dubbele mappen konden niet worden verwijderd: ${deleteError.message}`);
+        setWorkspaceReady(true);
+        return false;
       } else {
         const movedNotes = new Map(duplicateMap);
-        nextFolders = deduplicatedFolders;
+        nextFolders = rebalancedFolders;
         nextNotes = nextNotes.map((note) => ({
           ...note,
           folderId: movedNotes.get(note.folderId) || note.folderId,
@@ -639,6 +730,11 @@ function App() {
   const createFolder = async () => {
     const name = window.prompt("Naam van de nieuwe map");
     if (!name?.trim()) return;
+    if (folders.some((folder) => folderNameKey(folder.name) === folderNameKey(name))) {
+      setSaveError(`De map "${name.trim()}" bestaat al in het menu.`);
+      setSaved(false);
+      return;
+    }
     const parentId = activeFolderId || null;
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
