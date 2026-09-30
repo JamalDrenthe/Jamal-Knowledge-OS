@@ -127,21 +127,25 @@ function importedFolderKey(name: string) {
   return `blueprint:${folderNameKey(name)}`;
 }
 
-function inferImportedFolderKey(folder: FolderItem, folders: FolderItem[]) {
+function inferImportedFolderKey(
+  folder: FolderItem,
+  folders: FolderItem[],
+  visiting = new Set<string>(),
+): string | undefined {
   if (folder.importKey) return folder.importKey;
+  if (visiting.has(folder.id)) return undefined;
   const blueprint = importedFolderBlueprint.find((item) => folderNameKey(item.name) === folderNameKey(folder.name));
   if (!blueprint || folder.color !== blueprint.color) return undefined;
   const foldersById = new Map(folders.map((item) => [item.id, item]));
-  const ancestorNames = new Set<string>();
-  let parentId = folder.parentId;
-  while (parentId) {
-    const parent = foldersById.get(parentId);
-    if (!parent) break;
-    ancestorNames.add(folderNameKey(parent.name));
-    parentId = parent.parentId;
-  }
   if (blueprint.parent === null) return folder.parentId === null ? importedFolderKey(folder.name) : undefined;
-  return ancestorNames.has("bedrijven") && ancestorNames.has("jamaldrenthe")
+  const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
+  if (!parent) return undefined;
+  const parentImportKey: string | undefined = inferImportedFolderKey(
+    parent,
+    folders,
+    new Set([...visiting, folder.id]),
+  );
+  return parentImportKey === importedFolderKey(blueprint.parent)
     ? importedFolderKey(folder.name)
     : undefined;
 }
@@ -410,26 +414,38 @@ function App() {
       );
       if (error) {
         setSaveError(error.message);
+        nextFolders = foldersBeforeImport;
       }
     }
-    const alignedFolders = alignImportedFolderParents(nextFolders);
-    const parentChanges = alignedFolders.filter((folder) => {
+    const desiredFolders = alignImportedFolderParents(nextFolders);
+    const parentChanges = desiredFolders.filter((folder) => {
       const previous = nextFolders.find((item) => item.id === folder.id);
       return previous?.parentId !== folder.parentId;
     });
     if (parentChanges.length) {
-      const parentUpdates = await Promise.all(parentChanges.map((folder) => (
-        client.from("folders")
+      const parentUpdates = await Promise.all(parentChanges.map(async (folder) => ({
+        folderId: folder.id,
+        result: await client.from("folders")
           .update({ parent_id: folder.parentId })
           .eq("id", folder.id)
-          .eq("user_id", currentUserId)
-      )));
-      const parentError = parentUpdates.find((result) => result.error)?.error;
+          .eq("user_id", currentUserId),
+      })));
+      const parentError = parentUpdates.find(({ result }) => result.error)?.result.error;
       if (parentError) {
         setSaveError(`De bedrijfsstructuur kon niet veilig worden hersteld: ${parentError.message}`);
       }
+      const persistedParentIds = new Set(
+        parentUpdates
+          .filter(({ result }) => !result.error)
+          .map(({ folderId }) => folderId),
+      );
+      nextFolders = nextFolders.map((folder) => {
+        const desired = desiredFolders.find((item) => item.id === folder.id);
+        return desired && persistedParentIds.has(folder.id)
+          ? desired
+          : folder;
+      });
     }
-    nextFolders = alignedFolders;
     const foldersById = new Map(nextFolders.map((folder) => [folder.id, folder]));
     const angelsMediateFolders = nextFolders.filter((folder) => folder.name === "Angels Mediate");
     if (angelsMediateFolders.length) {
