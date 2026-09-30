@@ -23,21 +23,21 @@ const importedFolderBlueprint: Array<{ name: string; parent: string | null; colo
   { name: "In De Roos", parent: "Jamal Drenthe", color: "blue" },
   { name: "OpenCourse", parent: "Jamal Drenthe", color: "blue" },
   { name: "Overskilled", parent: "Jamal Drenthe", color: "blue" },
-  { name: "Prompt DJ", parent: "Overskilled", color: "blue" },
-  { name: "Speech Tool or Make The Conversation", parent: "Overskilled", color: "blue" },
+  { name: "Prompt DJ", parent: "Jamal Drenthe", color: "blue" },
+  { name: "Speech Tool or Make The Conversation", parent: "Jamal Drenthe", color: "blue" },
   { name: "QuantumInitium", parent: "Jamal Drenthe", color: "mint" },
-  { name: "Afterstudenthousing", parent: "QuantumInitium", color: "mint" },
-  { name: "Boostplug", parent: "QuantumInitium", color: "mint" },
-  { name: "CRMos", parent: "QuantumInitium", color: "mint" },
-  { name: "Djobba", parent: "QuantumInitium", color: "mint" },
-  { name: "Immigratiepunt", parent: "QuantumInitium", color: "mint" },
-  { name: "Investbotiq", parent: "QuantumInitium", color: "mint" },
-  { name: "Logs Rent", parent: "Investbotiq", color: "mint" },
-  { name: "Spontiva", parent: "QuantumInitium", color: "mint" },
-  { name: "VVC", parent: "QuantumInitium", color: "mint" },
-  { name: "WoningVry", parent: "VVC", color: "mint" },
-  { name: "Xabi World", parent: "VVC", color: "mint" },
-  { name: "Zheavenzy", parent: "VVC", color: "mint" },
+  { name: "Afterstudenthousing", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Boostplug", parent: "Jamal Drenthe", color: "mint" },
+  { name: "CRMos", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Djobba", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Immigratiepunt", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Investbotiq", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Logs Rent", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Spontiva", parent: "Jamal Drenthe", color: "mint" },
+  { name: "VVC", parent: "Jamal Drenthe", color: "mint" },
+  { name: "WoningVry", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Xabi World", parent: "Jamal Drenthe", color: "mint" },
+  { name: "Zheavenzy", parent: "Jamal Drenthe", color: "mint" },
   { name: "To-Do", parent: null, color: "amber" },
 ];
 
@@ -66,7 +66,6 @@ const initialFolders: FolderItem[] = [
 const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC", "Projects"]);
 const importedDocumentBlueprint = [
   { key: "quantuminitium-growth-engine-pdf", title: "QuantumInitium Growth Engine (PDF)" },
-  { key: "quantuminitium", title: "QuantumInitium" },
 ];
 
 const initialNotes: Note[] = [
@@ -121,6 +120,48 @@ function folderNameKey(name: string) {
 
 function canonicalFolderName(name: string) {
   return folderNameKey(name) === "quantuminitium" ? "QuantumInitium" : name.trim();
+}
+
+function addMissingImportedFolders(folders: FolderItem[]) {
+  const nextFolders = [...folders];
+  const foldersByName = new Map(nextFolders.map((folder) => [folderNameKey(folder.name), folder]));
+
+  importedFolderBlueprint.forEach((blueprint) => {
+    const key = folderNameKey(blueprint.name);
+    if (foldersByName.has(key)) return;
+
+    const parent = blueprint.parent
+      ? foldersByName.get(folderNameKey(blueprint.parent)) || null
+      : null;
+    const siblingCount = nextFolders.filter((folder) => folder.parentId === (parent?.id || null)).length;
+    const folder: FolderItem = {
+      id: crypto.randomUUID(),
+      name: canonicalFolderName(blueprint.name),
+      parentId: parent?.id || null,
+      color: blueprint.color,
+      position: siblingCount,
+    };
+    nextFolders.push(folder);
+    foldersByName.set(key, folder);
+  });
+
+  return nextFolders;
+}
+
+function alignImportedFolderParents(folders: FolderItem[]) {
+  const foldersByName = new Map(folders.map((folder) => [folderNameKey(folder.name), folder]));
+  return folders.map((folder) => {
+    const blueprint = importedFolderBlueprint.find(
+      (item) => folderNameKey(item.name) === folderNameKey(folder.name),
+    );
+    if (!blueprint) return folder;
+    const expectedParentId = blueprint.parent
+      ? foldersByName.get(folderNameKey(blueprint.parent))?.id || null
+      : null;
+    return folder.parentId === expectedParentId
+      ? folder
+      : { ...folder, parentId: expectedParentId };
+  });
 }
 
 function deduplicateFolders(folders: FolderItem[]) {
@@ -214,6 +255,9 @@ function App() {
   const [workspaceView, setWorkspaceView] = useState<"notes" | "graph">("notes");
   const [mobileNav, setMobileNav] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [folderParentDraft, setFolderParentDraft] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => Object.fromEntries(initialFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -298,22 +342,49 @@ function App() {
         setWorkspaceReady(true);
         return false;
       }
-    } else if (!nextFolders.some((folder) => folder.name === "Bedrijven")) {
-      const importedFolders = createImportedFolders(() => crypto.randomUUID()).map(({ parentId, ...folder }, index) => ({
-        ...folder,
-        user_id: currentUserId,
-        parent_id: parentId,
-        position: nextFolders.length + index,
-      }));
-      const { error } = await client.from("folders").insert(importedFolders);
-      if (!error) {
-        const importedFolderItems = importedFolders.map(({ user_id: _userId, parent_id, ...folder }) => ({
-          ...folder,
-          parentId: parent_id,
-        }));
-        nextFolders = [...nextFolders, ...importedFolderItems];
+    }
+    const foldersBeforeImport = nextFolders;
+    nextFolders = addMissingImportedFolders(nextFolders);
+    const newImportedFolders = nextFolders.filter(
+      (folder) => !foldersBeforeImport.some((existingFolder) => existingFolder.id === folder.id),
+    );
+    if (newImportedFolders.length) {
+      const { error } = await client.from("folders").insert(
+        newImportedFolders.map((folder) => ({
+          id: folder.id,
+          user_id: currentUserId,
+          name: folder.name,
+          parent_id: folder.parentId,
+          color: folder.color,
+          position: folder.position,
+        })),
+      );
+      if (error) {
+        setSaveError(error.message);
+        setWorkspaceReady(true);
+        return false;
       }
     }
+    const alignedFolders = alignImportedFolderParents(nextFolders);
+    const parentChanges = alignedFolders.filter((folder) => {
+      const previous = nextFolders.find((item) => item.id === folder.id);
+      return previous?.parentId !== folder.parentId;
+    });
+    if (parentChanges.length) {
+      const parentUpdates = await Promise.all(parentChanges.map((folder) => (
+        client.from("folders")
+          .update({ parent_id: folder.parentId })
+          .eq("id", folder.id)
+          .eq("user_id", currentUserId)
+      )));
+      const parentError = parentUpdates.find((result) => result.error)?.error;
+      if (parentError) {
+        setSaveError(`De bedrijfsstructuur kon niet veilig worden hersteld: ${parentError.message}`);
+        setWorkspaceReady(true);
+        return false;
+      }
+    }
+    nextFolders = alignedFolders;
     const foldersById = new Map(nextFolders.map((folder) => [folder.id, folder]));
     const angelsMediateFolders = nextFolders.filter((folder) => folder.name === "Angels Mediate");
     if (angelsMediateFolders.length) {
@@ -405,6 +476,26 @@ function App() {
     } else {
       nextFolders = deduplicatedFolders;
     }
+    const positionedFolders = rebalanceFolderPositions(nextFolders);
+    const positionChanges = positionedFolders.filter((folder) => {
+      const previous = nextFolders.find((item) => item.id === folder.id);
+      return previous?.position !== folder.position;
+    });
+    if (positionChanges.length) {
+      const positionUpdates = await Promise.all(positionChanges.map((folder) => (
+        client.from("folders")
+          .update({ position: folder.position })
+          .eq("id", folder.id)
+          .eq("user_id", currentUserId)
+      )));
+      const positionError = positionUpdates.find((result) => result.error)?.error;
+      if (positionError) {
+        setSaveError(`De bedrijfsvolgorde kon niet veilig worden opgeslagen: ${positionError.message}`);
+        setWorkspaceReady(true);
+        return false;
+      }
+    }
+    nextFolders = positionedFolders;
     const quantumFolder = nextFolders.find((folder) => (
       folder.name === "QuantumInitium"
       && nextFolders.some((parent) => parent.id === folder.parentId && parent.name === "Jamal Drenthe")
@@ -457,6 +548,21 @@ function App() {
             ];
           }
         }
+      }
+    }
+    const quantumCompanyNote = nextNotes.find((note) => note.importKey === "quantuminitium");
+    if (quantumCompanyNote) {
+      const renamedTitle = "QuantumInitium overview";
+      const { error } = await client.from("notes")
+        .update({ title: renamedTitle })
+        .eq("id", quantumCompanyNote.id)
+        .eq("user_id", currentUserId);
+      if (error) {
+        setSaveError(`De QuantumInitium-notitie kon niet netjes worden hernoemd: ${error.message}`);
+      } else {
+        nextNotes = nextNotes.map((note) => (
+          note.id === quantumCompanyNote.id ? { ...note, title: renamedTitle } : note
+        ));
       }
     }
     if (authGeneration !== authGenerationRef.current) return false;
@@ -727,15 +833,19 @@ function App() {
     void updateNote({ tags: activeNote.tags.filter((item) => item !== tag) });
   };
 
-  const createFolder = async () => {
-    const name = window.prompt("Naam van de nieuwe map");
-    if (!name?.trim()) return;
+  const createFolder = () => {
+    setFolderNameDraft("");
+    setFolderParentDraft(activeFolderId);
+    setFolderModalOpen(true);
+  };
+
+  const saveNewFolder = async (name: string, parentId: string | null) => {
+    setFolderModalOpen(false);
     if (folders.some((folder) => folderNameKey(folder.name) === folderNameKey(name))) {
       setSaveError(`De map "${name.trim()}" bestaat al in het menu.`);
       setSaved(false);
       return;
     }
-    const parentId = activeFolderId || null;
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
     const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
     setSaved(false);
@@ -976,7 +1086,7 @@ function App() {
           <NavItem icon={<LayoutGrid size={16} />} label="All notes" active={workspaceView === "notes" && !activeFolderId && noteFilter === "all" && !tagFilter} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} count={String(notes.length)} />
           <NavItem icon={<Clock3 size={16} />} label="Recently edited" active={noteFilter === "recent"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} />
           <NavItem icon={<Star size={16} />} label="Favorites" active={noteFilter === "favorites"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} count={String(notes.filter((note) => note.favorite).length)} />
-          <div className="nav-label nav-label-with-action"><span>Folders</span><button className="nav-add-button" onClick={() => void createFolder()} aria-label="Create folder"><FolderPlus size={14} /></button></div>
+          <div className="nav-label nav-label-with-action"><span>Folders</span><button className="nav-add-button" onClick={createFolder} aria-label="Create folder"><FolderPlus size={14} /></button></div>
           {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} />)}
           <div className="nav-label">Explore</div>
           <NavItem icon={<Network size={16} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
@@ -995,7 +1105,8 @@ function App() {
           <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${statusSaved ? "is-saved" : ""}`}><span /> {statusError || (activeNoteSavePending ? "Saving…" : "Saved")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder">{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
         </div>}
       </section>
-      {commandPaletteOpen && <CommandPalette onClose={() => setCommandPaletteOpen(false)} onNewNote={() => { setCommandPaletteOpen(false); void createNote(); }} onNewFolder={() => { setCommandPaletteOpen(false); void createFolder(); }} onAllNotes={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onFavorites={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} onRecent={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} onGraph={() => { setCommandPaletteOpen(false); setWorkspaceView("graph"); }} onToggleTheme={() => { setCommandPaletteOpen(false); setTheme(theme === "light" ? "dark" : "light"); }} />}
+      {commandPaletteOpen && <CommandPalette onClose={() => setCommandPaletteOpen(false)} onNewNote={() => { setCommandPaletteOpen(false); void createNote(); }} onNewFolder={() => { setCommandPaletteOpen(false); createFolder(); }} onAllNotes={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onFavorites={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} onRecent={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} onGraph={() => { setCommandPaletteOpen(false); setWorkspaceView("graph"); }} onToggleTheme={() => { setCommandPaletteOpen(false); setTheme(theme === "light" ? "dark" : "light"); }} />}
+      {folderModalOpen && <FolderModal name={folderNameDraft} parentId={folderParentDraft} folders={folders} onNameChange={setFolderNameDraft} onParentChange={setFolderParentDraft} onClose={() => setFolderModalOpen(false)} onSubmit={(name, parentId) => void saveNewFolder(name, parentId)} />}
       {showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} />}
     </main>
   );
@@ -1003,8 +1114,10 @@ function App() {
 
 function FolderTree({ folder, folders, activeFolderId, expanded, dropTarget, onToggle, onSelect, onShift, onDragStart, onDragOver, onDrop }: { folder: FolderItem; folders: FolderItem[]; activeFolderId: string | null; expanded: Record<string, boolean>; dropTarget: { id: string; mode: "before" | "inside" | "after" } | null; onToggle: (id: string) => void; onSelect: (id: string) => void; onShift: (id: string, delta: number) => void; onDragStart: (id: string) => void; onDragOver: (event: React.DragEvent<HTMLDivElement>, id: string) => void; onDrop: (event: React.DragEvent<HTMLDivElement>, id: string) => void }) {
   const children = folders.filter((item) => item.parentId === folder.id).sort((a, b) => a.position - b.position);
+  const siblings = folders.filter((item) => item.parentId === folder.parentId).sort((a, b) => a.position - b.position);
+  const siblingIndex = siblings.findIndex((item) => item.id === folder.id);
   const dropMode = dropTarget?.id === folder.id ? dropTarget.mode : "";
-  return <div className="folder-tree"><div className={`folder-drop-row ${dropMode ? `drop-${dropMode}` : ""}`} draggable onDragStart={() => onDragStart(folder.id)} onDragOver={(event) => onDragOver(event, folder.id)} onDrop={(event) => void onDrop(event, folder.id)}><div className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`}><button className="folder-select" onClick={() => onSelect(folder.id)}><span><span className="tree-toggle" onClick={(event) => { event.stopPropagation(); if (children.length) onToggle(folder.id); }}>{children.length ? (expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span className="tree-spacer" />}</span><Folder size={16} />{folder.name}</span></button><span className="folder-row-actions"><button className="folder-move-button" onClick={(event) => { event.stopPropagation(); void onShift(folder.id, -1); }} aria-label={`Move ${folder.name} up`}><ChevronUp size={12} /></button><button className="folder-move-button" onClick={(event) => { event.stopPropagation(); void onShift(folder.id, 1); }} aria-label={`Move ${folder.name} down`}><ChevronDown size={12} /></button><GripVertical className="folder-drag-handle" size={14} aria-hidden="true" /></span></div></div>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={onToggle} onSelect={onSelect} onShift={onShift} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} /></div>)}</div>;
+  return <div className="folder-tree"><div className={`folder-drop-row ${dropMode ? `drop-${dropMode}` : ""}`} draggable onDragStart={() => onDragStart(folder.id)} onDragOver={(event) => onDragOver(event, folder.id)} onDrop={(event) => void onDrop(event, folder.id)}><div className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`}><div className="folder-main">{children.length ? <button type="button" className="tree-toggle" onClick={() => onToggle(folder.id)} aria-label={`${expanded[folder.id] ? "Collapse" : "Expand"} ${folder.name}`} aria-expanded={expanded[folder.id]}>{expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-spacer" aria-hidden="true" />}<button type="button" className="folder-select" onClick={() => onSelect(folder.id)} title={folder.name}><span><Folder size={16} />{folder.name}</span></button></div><span className="folder-row-actions"><button type="button" className="folder-move-button" disabled={siblingIndex <= 0} onClick={() => void onShift(folder.id, -1)} aria-label={`Move ${folder.name} up`} title={siblingIndex <= 0 ? "Already first" : `Move ${folder.name} up`}><ChevronUp size={13} /></button><button type="button" className="folder-move-button" disabled={siblingIndex === siblings.length - 1} onClick={() => void onShift(folder.id, 1)} aria-label={`Move ${folder.name} down`} title={siblingIndex === siblings.length - 1 ? "Already last" : `Move ${folder.name} down`}><ChevronDown size={13} /></button><span className="folder-drag-handle" title={`Drag ${folder.name} to reorder`} aria-label={`Drag ${folder.name} to reorder`}><GripVertical size={15} aria-hidden="true" /></span></span></div></div>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={onToggle} onSelect={onSelect} onShift={onShift} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} /></div>)}</div>;
 }
 
 function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, error, locked = false }: { mode: "login" | "register"; setMode: (mode: "login" | "register") => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>, email: string, password: string) => void; onGoogle: () => void; error?: string; locked?: boolean }) {
@@ -1015,6 +1128,16 @@ function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, error, locked =
 
 function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNode; label: string; count?: string; active?: boolean; onClick?: () => void }) {
   return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}><span>{icon}{label}</span>{count && <small>{count}</small>}</button>;
+}
+
+function FolderModal({ name, parentId, folders, onNameChange, onParentChange, onClose, onSubmit }: { name: string; parentId: string | null; folders: FolderItem[]; onNameChange: (name: string) => void; onParentChange: (parentId: string | null) => void; onClose: () => void; onSubmit: (name: string, parentId: string | null) => void }) {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (trimmedName) onSubmit(trimmedName, parentId);
+  };
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="folder-modal" role="dialog" aria-modal="true" aria-labelledby="folder-modal-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><X size={17} /></button><div className="auth-icon"><FolderPlus size={19} /></div><p className="eyebrow">Organize your vault</p><h2 id="folder-modal-title">New folder</h2><p className="auth-copy">Create a folder at the root or inside another folder. It will be saved immediately.</p><form className="folder-form" onSubmit={handleSubmit}><label>Folder name<input autoFocus value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Client research" required /></label><label>Location<select value={parentId || ""} onChange={(event) => onParentChange(event.target.value || null)}><option value="">Root folders</option>{folders.slice().sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><div className="folder-form-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancel</button><button type="submit" className="new-note-button">Create folder</button></div></form></section></div>;
 }
 
 function CommandPalette({ onClose, onNewNote, onNewFolder, onAllNotes, onFavorites, onRecent, onGraph, onToggleTheme }: { onClose: () => void; onNewNote: () => void; onNewFolder: () => void; onAllNotes: () => void; onFavorites: () => void; onRecent: () => void; onGraph: () => void; onToggleTheme: () => void }) {
