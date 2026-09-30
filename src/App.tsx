@@ -6,7 +6,7 @@ import {
 import { supabase } from "./lib/supabase";
 
 type Theme = "light" | "dark";
-type FolderItem = { id: string; name: string; parentId: string | null; color: string; position: number };
+type FolderItem = { id: string; name: string; parentId: string | null; color: string; position: number; importKey?: string };
 type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
@@ -52,6 +52,7 @@ const createImportedFolders = (idFactory: () => string): FolderItem[] => {
       parentId: folder.parent ? ids.get(folder.parent) || null : null,
       color: folder.color,
       position: index,
+      importKey: `blueprint:${folderNameKey(folder.name)}`,
     };
   });
 };
@@ -122,16 +123,46 @@ function canonicalFolderName(name: string) {
   return folderNameKey(name) === "quantuminitium" ? "QuantumInitium" : name.trim();
 }
 
+function importedFolderKey(name: string) {
+  return `blueprint:${folderNameKey(name)}`;
+}
+
+function inferImportedFolderKey(folder: FolderItem, folders: FolderItem[]) {
+  if (folder.importKey) return folder.importKey;
+  const blueprint = importedFolderBlueprint.find((item) => folderNameKey(item.name) === folderNameKey(folder.name));
+  if (!blueprint || folder.color !== blueprint.color) return undefined;
+  const foldersById = new Map(folders.map((item) => [item.id, item]));
+  const ancestorNames = new Set<string>();
+  let parentId = folder.parentId;
+  while (parentId) {
+    const parent = foldersById.get(parentId);
+    if (!parent) break;
+    ancestorNames.add(folderNameKey(parent.name));
+    parentId = parent.parentId;
+  }
+  if (blueprint.parent === null) return folder.parentId === null ? importedFolderKey(folder.name) : undefined;
+  return ancestorNames.has("bedrijven") && ancestorNames.has("jamaldrenthe")
+    ? importedFolderKey(folder.name)
+    : undefined;
+}
+
+function markLegacyImportedFolders(folders: FolderItem[]) {
+  return folders.map((folder) => {
+    const importKey = inferImportedFolderKey(folder, folders);
+    return importKey ? { ...folder, importKey } : folder;
+  });
+}
+
 function addMissingImportedFolders(folders: FolderItem[]) {
   const nextFolders = [...folders];
-  const foldersByName = new Map(nextFolders.map((folder) => [folderNameKey(folder.name), folder]));
+  const foldersByImportKey = new Map(nextFolders.filter((folder) => folder.importKey).map((folder) => [folder.importKey, folder]));
 
   importedFolderBlueprint.forEach((blueprint) => {
-    const key = folderNameKey(blueprint.name);
-    if (foldersByName.has(key)) return;
+    const importKey = importedFolderKey(blueprint.name);
+    if (foldersByImportKey.has(importKey)) return;
 
     const parent = blueprint.parent
-      ? foldersByName.get(folderNameKey(blueprint.parent)) || null
+      ? foldersByImportKey.get(importedFolderKey(blueprint.parent)) || null
       : null;
     const siblingCount = nextFolders.filter((folder) => folder.parentId === (parent?.id || null)).length;
     const folder: FolderItem = {
@@ -140,23 +171,24 @@ function addMissingImportedFolders(folders: FolderItem[]) {
       parentId: parent?.id || null,
       color: blueprint.color,
       position: siblingCount,
+      importKey,
     };
     nextFolders.push(folder);
-    foldersByName.set(key, folder);
+    foldersByImportKey.set(importKey, folder);
   });
 
   return nextFolders;
 }
 
 function alignImportedFolderParents(folders: FolderItem[]) {
-  const foldersByName = new Map(folders.map((folder) => [folderNameKey(folder.name), folder]));
+  const foldersByImportKey = new Map(folders.filter((folder) => folder.importKey).map((folder) => [folder.importKey, folder]));
   return folders.map((folder) => {
     const blueprint = importedFolderBlueprint.find(
-      (item) => folderNameKey(item.name) === folderNameKey(folder.name),
+      (item) => importedFolderKey(item.name) === folder.importKey,
     );
     if (!blueprint) return folder;
     const expectedParentId = blueprint.parent
-      ? foldersByName.get(folderNameKey(blueprint.parent))?.id || null
+      ? foldersByImportKey.get(importedFolderKey(blueprint.parent))?.id || null
       : null;
     return folder.parentId === expectedParentId
       ? folder
@@ -183,6 +215,9 @@ function deduplicateFolders(folders: FolderItem[]) {
     const isCompanyFolder = pathKey === "bedrijven/jamaldrenthe" || pathKey.startsWith("bedrijven/jamaldrenthe/");
     return [isCompanyFolder ? 0 : 1, folder.position, folder.id] as const;
   };
+  const getDeduplicationKey = (folder: FolderItem) => (
+    folder.importKey || `${getPathKey(folder.id)}:${folderNameKey(folder.name)}`
+  );
   const getDepth = (folder: FolderItem) => {
     let depth = 0;
     let parentId = folder.parentId;
@@ -202,7 +237,7 @@ function deduplicateFolders(folders: FolderItem[]) {
     if (!folder || visiting.has(folderId)) return null;
     visiting.add(folderId);
     const parentId = folder.parentId ? resolve(folder.parentId, visiting) : null;
-    const key = folderNameKey(folder.name);
+    const key = getDeduplicationKey(folder);
     const existingId = canonicalByKey.get(key);
     if (existingId) {
       canonicalById.set(folderId, existingId);
@@ -300,7 +335,7 @@ function App() {
     setWorkspaceReady(false);
     setSaveError("");
     const [folderResult, noteResult, attachmentResult] = await Promise.all([
-      client.from("folders").select("id,name,parent_id,color,position").eq("user_id", currentUserId).order("position").order("created_at"),
+      client.from("folders").select("id,name,parent_id,color,position,import_key").eq("user_id", currentUserId).order("position").order("created_at"),
       client.from("notes").select("id,title,body,folder_id,tags,favorite,updated_at,import_key").eq("user_id", currentUserId).order("updated_at", { ascending: false }),
       client.from("attachments").select("id,note_id,storage_path,file_name,mime_type,file_size").eq("user_id", currentUserId).order("created_at"),
     ]);
@@ -311,12 +346,13 @@ function App() {
       setWorkspaceReady(true);
       return false;
     }
-    let nextFolders = (folderResult.data || []).map((folder, index) => ({
+    let nextFolders: FolderItem[] = (folderResult.data || []).map((folder, index) => ({
       id: folder.id,
       name: folder.name,
       parentId: folder.parent_id,
       color: folder.color,
       position: folder.position ?? index,
+      importKey: folder.import_key || undefined,
     }));
     let nextNotes = mapNotes(noteResult.data || [], attachmentResult.data || []);
     if (!nextFolders.length && !nextNotes.length) {
@@ -329,7 +365,7 @@ function App() {
           || nextFolders.find((folder) => folder.name === "QuantumInitium")?.id
           || nextFolders[0].id,
       }));
-      const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position }));
+      const foldersToInsert = nextFolders.map((folder) => ({ id: folder.id, user_id: currentUserId, name: folder.name, parent_id: folder.parentId, color: folder.color, position: folder.position, import_key: folder.importKey || null }));
       const notesToInsert = nextNotes.map((note) => ({ id: note.id, user_id: currentUserId, folder_id: note.folderId, title: note.title, body: note.body, tags: note.tags, favorite: note.favorite || false, import_key: note.importKey || null }));
       const [foldersInsert, notesInsert] = await Promise.all([
         client.from("folders").insert(foldersToInsert),
@@ -342,6 +378,18 @@ function App() {
         setWorkspaceReady(true);
         return false;
       }
+    }
+    nextFolders = markLegacyImportedFolders(nextFolders);
+    const legacyImportKeyUpdates = nextFolders.filter((folder) => folder.importKey && !folderResult.data?.find((row) => row.id === folder.id)?.import_key);
+    if (legacyImportKeyUpdates.length) {
+      const legacyImportResults = await Promise.all(legacyImportKeyUpdates.map((folder) => (
+        client.from("folders")
+          .update({ import_key: folder.importKey })
+          .eq("id", folder.id)
+          .eq("user_id", currentUserId)
+      )));
+      const legacyImportError = legacyImportResults.find((result) => result.error)?.error;
+      if (legacyImportError) setSaveError(`De geïmporteerde mappen konden niet worden gemarkeerd: ${legacyImportError.message}`);
     }
     const foldersBeforeImport = nextFolders;
     nextFolders = addMissingImportedFolders(nextFolders);
@@ -357,12 +405,11 @@ function App() {
           parent_id: folder.parentId,
           color: folder.color,
           position: folder.position,
+          import_key: folder.importKey || null,
         })),
       );
       if (error) {
         setSaveError(error.message);
-        setWorkspaceReady(true);
-        return false;
       }
     }
     const alignedFolders = alignImportedFolderParents(nextFolders);
@@ -380,8 +427,6 @@ function App() {
       const parentError = parentUpdates.find((result) => result.error)?.error;
       if (parentError) {
         setSaveError(`De bedrijfsstructuur kon niet veilig worden hersteld: ${parentError.message}`);
-        setWorkspaceReady(true);
-        return false;
       }
     }
     nextFolders = alignedFolders;
