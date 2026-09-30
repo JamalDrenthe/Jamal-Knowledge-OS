@@ -138,16 +138,23 @@ function inferImportedFolderKey(
   if (!blueprint || folder.color !== blueprint.color) return undefined;
   const foldersById = new Map(folders.map((item) => [item.id, item]));
   if (blueprint.parent === null) return folder.parentId === null ? importedFolderKey(folder.name) : undefined;
-  const parent = folder.parentId ? foldersById.get(folder.parentId) : undefined;
-  if (!parent) return undefined;
-  const parentImportKey: string | undefined = inferImportedFolderKey(
-    parent,
-    folders,
-    new Set([...visiting, folder.id]),
-  );
-  return parentImportKey === importedFolderKey(blueprint.parent)
-    ? importedFolderKey(folder.name)
-    : undefined;
+  let parentId = folder.parentId;
+  const ancestorIds = new Set<string>();
+  while (parentId && !ancestorIds.has(parentId)) {
+    ancestorIds.add(parentId);
+    const parent = foldersById.get(parentId);
+    if (!parent) return undefined;
+    const parentImportKey: string | undefined = inferImportedFolderKey(
+      parent,
+      folders,
+      new Set([...visiting, folder.id]),
+    );
+    if (parentImportKey === importedFolderKey(blueprint.parent)) {
+      return importedFolderKey(folder.name);
+    }
+    parentId = parent.parentId;
+  }
+  return undefined;
 }
 
 function markLegacyImportedFolders(folders: FolderItem[]) {
@@ -191,8 +198,9 @@ function alignImportedFolderParents(folders: FolderItem[]) {
       (item) => importedFolderKey(item.name) === folder.importKey,
     );
     if (!blueprint) return folder;
+    if (blueprint.parent && !foldersByImportKey.has(importedFolderKey(blueprint.parent))) return folder;
     const expectedParentId = blueprint.parent
-      ? foldersByImportKey.get(importedFolderKey(blueprint.parent))?.id || null
+      ? foldersByImportKey.get(importedFolderKey(blueprint.parent))?.id || folder.parentId
       : null;
     return folder.parentId === expectedParentId
       ? folder
