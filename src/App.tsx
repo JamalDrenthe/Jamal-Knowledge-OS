@@ -6,7 +6,15 @@ import {
 import { supabase } from "./lib/supabase";
 
 type Theme = "light" | "dark";
-type FolderItem = { id: string; name: string; parentId: string | null; color: string; position: number; importKey?: string };
+type FolderItem = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  color: string;
+  position: number;
+  importKey?: string;
+  importKeyPersisted?: boolean;
+};
 type Attachment = { id: string; name: string; size: string; storagePath?: string; mimeType?: string; file?: File };
 type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
@@ -53,6 +61,7 @@ const createImportedFolders = (idFactory: () => string): FolderItem[] => {
       color: folder.color,
       position: index,
       importKey: `blueprint:${folderNameKey(folder.name)}`,
+      importKeyPersisted: true,
     };
   });
 };
@@ -231,7 +240,13 @@ function deduplicateFolders(folders: FolderItem[]) {
     const hasExpectedParent = blueprint?.parent
       ? foldersById.get(folder.parentId || "")?.importKey === importedFolderKey(blueprint.parent)
       : folder.parentId === null;
-    return [hasExpectedParent ? 0 : 1, isCompanyFolder ? 0 : 1, folder.position, folder.id] as const;
+    return [
+      folder.importKeyPersisted ? 0 : 1,
+      hasExpectedParent ? 0 : 1,
+      isCompanyFolder ? 0 : 1,
+      folder.position,
+      folder.id,
+    ] as const;
   };
   const getDeduplicationKey = (folder: FolderItem) => (
     folder.importKey || `${getPathKey(folder.id)}:${folderNameKey(folder.name)}`
@@ -269,9 +284,10 @@ function deduplicateFolders(folders: FolderItem[]) {
 
   [...folders].sort((a, b) => {
     const depthDifference = getDepth(a) - getDepth(b);
-    const [aCanonical, aCompany, aPosition, aId] = sortPriority(a);
-    const [bCanonical, bCompany, bPosition, bId] = sortPriority(b);
+    const [aPersisted, aCanonical, aCompany, aPosition, aId] = sortPriority(a);
+    const [bPersisted, bCanonical, bCompany, bPosition, bId] = sortPriority(b);
     return depthDifference
+      || aPersisted - bPersisted
       || aCanonical - bCanonical
       || aCompany - bCompany
       || aPosition - bPosition
@@ -375,6 +391,7 @@ function App() {
       color: folder.color,
       position: folder.position ?? index,
       importKey: folder.import_key || undefined,
+      importKeyPersisted: Boolean(folder.import_key),
     }));
     let nextNotes = mapNotes(noteResult.data || [], attachmentResult.data || []);
     if (!nextFolders.length && !nextNotes.length) {
@@ -407,20 +424,36 @@ function App() {
         .map((row) => row.import_key)
         .filter((importKey): importKey is string => Boolean(importKey)),
     );
-    const legacyImportKeyUpdates = nextFolders.filter((folder) => (
-      folder.importKey
-      && !folderResult.data?.find((row) => row.id === folder.id)?.import_key
-      && !persistedImportKeys.has(folder.importKey)
-    ));
+    const legacyImportKeyUpdates = [...new Map(
+      nextFolders
+        .filter((folder) => (
+          folder.importKey
+          && !folder.importKeyPersisted
+          && !persistedImportKeys.has(folder.importKey)
+        ))
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+        .map((folder) => [folder.importKey as string, folder]),
+    ).values()];
     if (legacyImportKeyUpdates.length) {
-      const legacyImportResults = await Promise.all(legacyImportKeyUpdates.map((folder) => (
-        client.from("folders")
+      const legacyImportResults = await Promise.all(legacyImportKeyUpdates.map(async (folder) => ({
+        folderId: folder.id,
+        result: await client.from("folders")
           .update({ import_key: folder.importKey })
           .eq("id", folder.id)
-          .eq("user_id", currentUserId)
-      )));
-      const legacyImportError = legacyImportResults.find((result) => result.error)?.error;
+          .eq("user_id", currentUserId),
+      })));
+      const legacyImportError = legacyImportResults.find(({ result }) => result.error)?.result.error;
       if (legacyImportError) setSaveError(`De geïmporteerde mappen konden niet worden gemarkeerd: ${legacyImportError.message}`);
+      const persistedLegacyFolderIds = new Set(
+        legacyImportResults
+          .filter(({ result }) => !result.error)
+          .map(({ folderId }) => folderId),
+      );
+      nextFolders = nextFolders.map((folder) => (
+        persistedLegacyFolderIds.has(folder.id)
+          ? { ...folder, importKeyPersisted: true }
+          : folder
+      ));
     }
     const foldersBeforeImport = nextFolders;
     nextFolders = addMissingImportedFolders(nextFolders);
