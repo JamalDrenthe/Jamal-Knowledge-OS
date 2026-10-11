@@ -9,9 +9,10 @@ const features = [
   { icon: <Paperclip size={19} />, title: "Bijlagen", text: "Voeg bestanden toe aan notities, privé opgeslagen en alleen voor jou toegankelijk." },
 ];
 
-export default function LandingPage({ onLogin }: { onLogin: () => void }) {
+export default function LandingPage({ onLogin, authError }: { onLogin: () => void; authError?: string | null }) {
   return (
     <main className="landing-shell">
+      {authError && <div className="landing-auth-error" role="alert">{authError}</div>}
       <header className="landing-nav">
         <div className="landing-brand">
           <span className="brand-mark"><Sparkles size={16} /></span>

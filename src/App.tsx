@@ -1282,7 +1282,7 @@ function App() {
   };
 
   if (!sessionReady) return <main className="loading-screen">Loading your private vault…</main>;
-  if (!authenticated) return <><LandingPage onLogin={() => { setAuthMode("login"); setShowAuth(true); }} />{showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} />}</>;
+  if (!authenticated) return <><LandingPage onLogin={() => { setAuthMode("login"); setShowAuth(true); }} authError={authError} />{showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} />}</>;
   if (!workspaceReady) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
 
   return (
