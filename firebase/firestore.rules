@@ -1,0 +1,39 @@
+rules_version = '2';
+
+// Knowledge OS — owner-only toegang.
+// Data leeft onder users/{uid}; alleen de eigenaar (opgenomen in allowedUsers)
+// mag zijn eigen subcollections lezen en schrijven.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAllowed(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && exists(/databases/$(database)/documents/allowedUsers/$(uid));
+    }
+
+    match /users/{uid} {
+      allow read, write: if isAllowed(uid);
+
+      match /folders/{folderId} {
+        allow read, write: if isAllowed(uid);
+      }
+      match /notes/{noteId} {
+        allow read, write: if isAllowed(uid);
+      }
+      match /attachments/{attachmentId} {
+        allow read, write: if isAllowed(uid);
+      }
+    }
+
+    match /allowedUsers/{uid} {
+      // Alleen leesbaar voor de user zelf; schrijven uitsluitend via Admin SDK.
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+  }
+}
