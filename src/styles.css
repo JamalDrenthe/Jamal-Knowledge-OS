@@ -123,3 +123,4 @@ button { border: 0; cursor: pointer; }
 .landing-footer { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 22px; margin-top: auto; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
 .landing-footer .avatar { display: grid; place-items: center; width: 22px; height: 22px; color: #fff; background: var(--accent); border-radius: 50%; font-size: 9px; font-weight: 700; }
 .landing-footer svg { color: var(--accent); }
+.landing-auth-error { margin: 0; padding: 10px 20px; background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--danger, #ef4444) 35%, transparent); color: var(--danger, #ef4444); font-size: 12px; text-align: center; }
