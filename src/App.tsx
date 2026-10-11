@@ -4,6 +4,7 @@ import {
   LogOut, Menu, Moon, Network, Paperclip, Pencil, Plus, Search, Sparkles, Star, Sun, Tag, Trash2, X,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
+import LandingPage from "./LandingPage";
 
 type Theme = "light" | "dark";
 type FolderItem = {
@@ -1281,7 +1282,7 @@ function App() {
   };
 
   if (!sessionReady) return <main className="loading-screen">Loading your private vault…</main>;
-  if (!authenticated) return <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => undefined} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} locked />;
+  if (!authenticated) return <><LandingPage onLogin={() => { setAuthMode("login"); setShowAuth(true); }} />{showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} />}</>;
   if (!workspaceReady) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
 
   return (

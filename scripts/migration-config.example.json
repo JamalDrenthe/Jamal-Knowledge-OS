@@ -1,0 +1,7 @@
+{
+  "supabaseUrl": "https://poafujohkcylewlitvtz.supabase.co",
+  "supabaseUserId": "<uuid uit Supabase auth.users / folders.user_id>",
+  "firebaseUid": "<uid van het Firebase-account na eerste login>",
+  "storageBucket": "knowledge-attachments",
+  "dryRunDefault": true
+}
