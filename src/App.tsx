@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive, ChevronDown, ChevronRight, ChevronUp, Clock3, File, Folder, FolderPlus, GripVertical, Hash, LayoutGrid, Link2,
-  LogOut, Menu, Moon, Network, Paperclip, Plus, Search, Sparkles, Star, Sun, Tag, X,
+  LogOut, Menu, Moon, Network, Paperclip, Pencil, Plus, Search, Sparkles, Star, Sun, Tag, Trash2, X,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -20,6 +20,11 @@ type Note = {
   id: string; title: string; body: string; updated: string; folderId: string;
   tags: string[]; favorite?: boolean; attachments: Attachment[]; importKey?: string; updatedAt?: string;
 };
+
+const uuid = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 const importedFolderBlueprint: Array<{ name: string; parent: string | null; color: string }> = [
   { name: "Bedrijven", parent: null, color: "violet" },
@@ -67,13 +72,9 @@ const createImportedFolders = (idFactory: () => string): FolderItem[] => {
 };
 
 const initialFolders: FolderItem[] = [
-  ...createImportedFolders(() => crypto.randomUUID()),
-  { id: "ideas", name: "Ideas", parentId: null, color: "violet", position: 25 },
-  { id: "projects", name: "Projects", parentId: null, color: "blue", position: 26 },
-  { id: "principles", name: "Principles", parentId: null, color: "amber", position: 27 },
-  { id: "systems", name: "Systems", parentId: null, color: "mint", position: 28 },
+  ...createImportedFolders(() => uuid()),
 ];
-const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC", "Projects"]);
+const expandedFolderNames = new Set(["Bedrijven", "Jamal Drenthe", "Angels Mediate", "QuantumInitium", "Overskilled", "Investbotiq", "VVC"]);
 const importedDocumentBlueprint = [
   { key: "quantuminitium-growth-engine-pdf", title: "QuantumInitium Growth Engine (PDF)" },
 ];
@@ -82,11 +83,9 @@ const initialNotes: Note[] = [
   {
     id: "thesis", title: "The Knowledge OS thesis",
     body: "The best ideas should not disappear into chat history. They need a home that makes them easy to revisit, connect and turn into something real.\n\nA personal knowledge operating system is the layer between what I notice and what I build. It should make context compound instead of resetting every time a new project starts.\n\nCore principles\n- Capture ideas with almost zero friction.\n- Connect related thoughts automatically and visibly.\n- Keep ownership, history and permissions explicit.\n\nThe value is not in storing more information. It is in making the right context available at the right moment.",
-    updated: "Just now", updatedAt: "2026-09-29T08:40:00.000Z", folderId: "ideas", tags: ["vision", "systems"], favorite: true, attachments: [],
+    updated: "Just now", updatedAt: "2026-09-29T08:40:00.000Z", folderId: "", tags: ["vision", "systems"], favorite: true, attachments: [],
   },
   { id: "quantum", title: "Quantum Initium · 2026 direction", body: "Clarify the holding narrative: a portfolio of useful, compounding businesses with a clear operating system.", updated: "Yesterday", updatedAt: "2026-09-28T08:40:00.000Z", folderId: "quantum", tags: ["quantum", "strategy"], attachments: [] },
-  { id: "reuse", title: "Build once, reuse everywhere", body: "Product decisions that should become shared patterns across the portfolio instead of one-off features.", updated: "Sep 27", updatedAt: "2026-09-27T08:40:00.000Z", folderId: "principles", tags: ["leverage", "product"], attachments: [] },
-  { id: "rhythm", title: "AI-native operating rhythm", body: "A weekly loop for capturing signal, choosing priorities, and converting context into focused execution.", updated: "Sep 25", updatedAt: "2026-09-25T08:40:00.000Z", folderId: "systems", tags: ["ai", "workflow"], attachments: [] },
 ];
 
 function mapNotes(rows: Array<{ id: string; title: string; body: string; folder_id: string | null; tags: string[]; favorite: boolean; updated_at: string; import_key: string | null }>, attachmentRows: Array<{ id: string; note_id: string; storage_path: string; file_name: string; mime_type: string | null; file_size: number | null }>): Note[] {
@@ -186,7 +185,7 @@ function addMissingImportedFolders(folders: FolderItem[]) {
       : null;
     const siblingCount = nextFolders.filter((folder) => folder.parentId === (parent?.id || null)).length;
     const folder: FolderItem = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: canonicalFolderName(blueprint.name),
       parentId: parent?.id || null,
       color: blueprint.color,
@@ -248,9 +247,14 @@ function deduplicateFolders(folders: FolderItem[]) {
       folder.id,
     ] as const;
   };
-  const getDeduplicationKey = (folder: FolderItem) => (
-    folder.importKey || `${getPathKey(folder.id)}:${folderNameKey(folder.name)}`
-  );
+  const getDeduplicationKey = (folder: FolderItem) => {
+    if (folder.importKey) return folder.importKey;
+    const blueprint = importedFolderBlueprint.find(
+      (item) => folderNameKey(item.name) === folderNameKey(folder.name) && item.color === folder.color,
+    );
+    if (blueprint) return importedFolderKey(blueprint.name);
+    return `name:${folderNameKey(folder.name)}`;
+  };
   const getDepth = (folder: FolderItem) => {
     let depth = 0;
     let parentId = folder.parentId;
@@ -331,6 +335,8 @@ function App() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderNameDraft, setFolderNameDraft] = useState("");
   const [folderParentDraft, setFolderParentDraft] = useState<string | null>(null);
+  const [folderFormError, setFolderFormError] = useState("");
+  const [menuEditMode, setMenuEditMode] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => Object.fromEntries(initialFolders.filter((folder) => expandedFolderNames.has(folder.name)).map((folder) => [folder.id, true])));
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -395,11 +401,11 @@ function App() {
     }));
     let nextNotes = mapNotes(noteResult.data || [], attachmentResult.data || []);
     if (!nextFolders.length && !nextNotes.length) {
-      const folderIds = new Map(initialFolders.map((folder) => [folder.id, crypto.randomUUID()]));
+      const folderIds = new Map(initialFolders.map((folder) => [folder.id, uuid()]));
       nextFolders = initialFolders.map((folder) => ({ ...folder, id: folderIds.get(folder.id) || folder.id, parentId: folder.parentId ? folderIds.get(folder.parentId) || null : null }));
       nextNotes = initialNotes.map((note) => ({
         ...note,
-        id: crypto.randomUUID(),
+        id: uuid(),
         folderId: folderIds.get(note.folderId)
           || nextFolders.find((folder) => folder.name === "QuantumInitium")?.id
           || nextFolders[0].id,
@@ -635,7 +641,7 @@ function App() {
       const missingImportedNotes = importedDocumentBlueprint
         .filter(({ key }) => !existingImportKeys.has(key))
         .map(({ key, title }) => ({
-          id: crypto.randomUUID(),
+          id: uuid(),
           user_id: currentUserId,
           folder_id: quantumFolder.id,
           import_key: key,
@@ -917,7 +923,7 @@ function App() {
   const createNote = async () => {
     const folderId = activeFolderId || folders[0]?.id || null;
     const updatedAt = new Date().toISOString();
-    const note: Note = { id: crypto.randomUUID(), title: "Untitled note", body: "", updated: "Just now", updatedAt, folderId: folderId || "", tags: [], attachments: [] };
+    const note: Note = { id: uuid(), title: "Untitled note", body: "", updated: "Just now", updatedAt, folderId: folderId || "", tags: [], attachments: [] };
     if (supabase && userId) {
       const { error } = await supabase.from("notes").insert({
         id: note.id,
@@ -957,18 +963,21 @@ function App() {
   const createFolder = () => {
     setFolderNameDraft("");
     setFolderParentDraft(activeFolderId);
+    setFolderFormError("");
     setFolderModalOpen(true);
   };
 
   const saveNewFolder = async (name: string, parentId: string | null) => {
-    setFolderModalOpen(false);
     if (folders.some((folder) => folderNameKey(folder.name) === folderNameKey(name))) {
+      setFolderFormError(`De map "${name.trim()}" bestaat al in het menu.`);
       setSaveError(`De map "${name.trim()}" bestaat al in het menu.`);
       setSaved(false);
       return;
     }
+    setFolderFormError("");
+    setFolderModalOpen(false);
     const siblingCount = folders.filter((item) => item.parentId === parentId).length;
-    const folder: FolderItem = { id: crypto.randomUUID(), name: name.trim(), parentId, color: "violet", position: siblingCount };
+    const folder: FolderItem = { id: uuid(), name: name.trim(), parentId, color: "violet", position: siblingCount };
     setSaved(false);
     setSaveError("");
     if (supabase && userId) {
@@ -989,6 +998,83 @@ function App() {
     setFolders((current) => [...current, folder]);
     if (parentId) setExpanded((current) => ({ ...current, [parentId]: true }));
     setActiveFolderId(folder.id);
+    setSaved(true);
+  };
+
+  const deleteNote = async (noteId: string) => {
+    const note = notes.find((item) => item.id === noteId);
+    if (!note) return;
+    const client = supabase;
+    if (client && userId) {
+      setSaved(false);
+      setSaveError("");
+      const { error } = await client.from("notes").delete().eq("id", noteId).eq("user_id", userId);
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+      const storagePaths = note.attachments
+        .map((attachment) => attachment.storagePath)
+        .filter((path): path is string => Boolean(path));
+      await client.from("attachments").delete().eq("note_id", noteId).eq("user_id", userId);
+      if (storagePaths.length) {
+        await client.storage.from("knowledge-attachments").remove(storagePaths);
+      }
+    }
+    pendingNoteChangesRef.current.delete(noteId);
+    setNoteSavePending((current) => {
+      const next = { ...current };
+      delete next[noteId];
+      return next;
+    });
+    setNoteSaveErrors((current) => {
+      const next = { ...current };
+      delete next[noteId];
+      return next;
+    });
+    const remaining = notes.filter((item) => item.id !== noteId);
+    setNotes(remaining);
+    if (activeNoteId === noteId) setActiveNoteId(remaining[0]?.id || "");
+    setSaved(true);
+  };
+
+  const deleteFolder = async (folderId: string) => {
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return;
+    const targetParentId = folder.parentId;
+    const client = supabase;
+    if (client && userId) {
+      setSaved(false);
+      setSaveError("");
+      const noteMove = await client.from("notes")
+        .update({ folder_id: targetParentId })
+        .eq("folder_id", folderId)
+        .eq("user_id", userId);
+      if (noteMove.error) {
+        setSaveError(`Notities konden niet worden verplaatst: ${noteMove.error.message}`);
+        return;
+      }
+      const childMove = await client.from("folders")
+        .update({ parent_id: targetParentId })
+        .eq("parent_id", folderId)
+        .eq("user_id", userId);
+      if (childMove.error) {
+        setSaveError(`Submappen konden niet worden verplaatst: ${childMove.error.message}`);
+        return;
+      }
+      const { error } = await client.from("folders").delete().eq("id", folderId).eq("user_id", userId);
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+    }
+    setFolders((current) => current
+      .filter((item) => item.id !== folderId)
+      .map((item) => (item.parentId === folderId ? { ...item, parentId: targetParentId } : item)));
+    setNotes((current) => current.map((item) => (
+      item.folderId === folderId ? { ...item, folderId: targetParentId || "" } : item
+    )));
+    if (activeFolderId === folderId) setActiveFolderId(targetParentId);
     setSaved(true);
   };
 
@@ -1106,10 +1192,10 @@ function App() {
     const uploaded: Attachment[] = [];
     for (const file of files) {
       if (!supabase || !userId) {
-        uploaded.push({ id: crypto.randomUUID(), name: file.name, size: formatBytes(file.size), mimeType: file.type, file });
+        uploaded.push({ id: uuid(), name: file.name, size: formatBytes(file.size), mimeType: file.type, file });
         continue;
       }
-      const id = crypto.randomUUID();
+      const id = uuid();
       const storagePath = `${userId}/${activeNote.id}/${id}-${file.name}`;
       const upload = await supabase.storage.from("knowledge-attachments").upload(storagePath, file, { upsert: false });
       if (upload.error) {
@@ -1196,19 +1282,18 @@ function App() {
 
   if (!sessionReady) return <main className="loading-screen">Loading your private vault…</main>;
   if (!authenticated) return <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => undefined} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} error={authError} locked />;
-  if (!workspaceReady || !activeNote) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
+  if (!workspaceReady) return <main className="loading-screen">{saveError || "Loading your private vault…"}</main>;
 
   return (
     <main className="app-shell">
       <aside className={`sidebar ${mobileNav ? "is-open" : ""}`}>
         <div className="brand-row"><div className="brand-mark"><Sparkles size={17} /></div><div><div className="brand-name">Knowledge OS</div><div className="brand-subtitle">Your connected second brain</div></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={18} /></button></div>
-        <div className="vault-switcher"><span className="avatar">JD</span><span className="vault-copy"><strong>Personal vault</strong><small>Private workspace</small></span><ChevronDown size={15} /></div>
         <nav className="side-nav" aria-label="Main navigation">
           <NavItem icon={<LayoutGrid size={16} />} label="All notes" active={workspaceView === "notes" && !activeFolderId && noteFilter === "all" && !tagFilter} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} count={String(notes.length)} />
           <NavItem icon={<Clock3 size={16} />} label="Recently edited" active={noteFilter === "recent"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} />
           <NavItem icon={<Star size={16} />} label="Favorites" active={noteFilter === "favorites"} onClick={() => { setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} count={String(notes.filter((note) => note.favorite).length)} />
-          <div className="nav-label nav-label-with-action"><span>Folders</span><button className="nav-add-button" onClick={createFolder} aria-label="Create folder"><FolderPlus size={14} /></button></div>
-          {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} />)}
+          <div className="nav-label nav-label-with-action"><span>Folders</span><span className="nav-label-buttons"><button className={`nav-add-button ${menuEditMode ? "is-active" : ""}`} onClick={() => setMenuEditMode((current) => !current)} aria-label={menuEditMode ? "Finish editing menu" : "Edit folders and notes"} title={menuEditMode ? "Done editing" : "Edit menu"}><Pencil size={13} /></button><button className="nav-add-button" onClick={createFolder} aria-label="Create folder"><FolderPlus size={14} /></button></span></div>
+          {folders.filter((folder) => !folder.parentId).sort((a, b) => a.position - b.position).map((folder) => <FolderTree key={folder.id} folder={folder} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} editMode={menuEditMode} onToggle={(id) => setExpanded((current) => ({ ...current, [id]: !current[id] }))} onSelect={(id) => { setActiveFolderId(id); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onShift={shiftFolder} onDragStart={setDraggedFolderId} onDragOver={handleFolderDragOver} onDrop={handleFolderDrop} onDelete={(id) => void deleteFolder(id)} />)}
           <div className="nav-label">Explore</div>
           <NavItem icon={<Network size={16} />} label="Knowledge graph" active={workspaceView === "graph"} onClick={() => setWorkspaceView("graph")} />
           <div className="nav-label">Tags</div>
@@ -1221,24 +1306,24 @@ function App() {
         <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Personal vault</span><span className="crumb-separator">/</span><strong>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</strong></div><div className="topbar-actions"><div className="search-box"><Search size={16} /><input ref={searchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your vault..." /><kbd>Ctrl K</kbd></div><button className="icon-button command-button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open quick actions"><span>⌘</span></button><button className="icon-button theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button><button className="new-note-button" onClick={() => void createNote()}><Plus size={17} /> New note</button></div></header>
 
         {workspaceView === "graph" ? <GraphView /> : <div className="content-grid">
-          <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <button className={`note-card ${activeNote.id === note.id ? "selected" : ""}`} key={note.id} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star"><Star size={13} fill="currentColor" /></span>}</button>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div></section>
+          <section className="notes-panel"><div className="panel-heading"><div><p className="eyebrow">Your knowledge base</p><h1>{activeFolderId ? folderMap.get(activeFolderId)?.name : tagFilter ? `#${tagFilter}` : noteFilter === "recent" ? "Recently edited" : noteFilter === "favorites" ? "Favorites" : "All notes"}</h1></div><button className="view-toggle" aria-label="Grid view"><LayoutGrid size={16} /></button></div><div className="notes-meta"><span>{filteredNotes.length} notes</span><button onClick={() => setNotes((current) => [...current].sort((a, b) => a.title.localeCompare(b.title)))}>A–Z <ChevronDown size={13} /></button></div><div className="note-list">{filteredNotes.map((note) => <div className="note-card-row" key={note.id}><button className={`note-card ${activeNote?.id === note.id ? "selected" : ""}`} onClick={() => setActiveNoteId(note.id)}><span className={`note-dot ${folderMap.get(note.folderId)?.color || "violet"}`} /><span className="note-card-body"><strong>{note.title}</strong><span>{note.body.split("\n")[0] || "Empty note"}</span><small>{note.updated} <i /> {note.tags.map((tag) => `#${tag}`).join("  ")}</small></span>{note.favorite && <span className="favorite-star"><Star size={13} fill="currentColor" /></span>}</button>{menuEditMode && <button type="button" className="note-delete-button" onClick={() => void deleteNote(note.id)} aria-label={`Delete ${note.title}`} title={`Delete ${note.title}`}><Trash2 size={13} /></button>}</div>)}{!filteredNotes.length && <div className="empty-state"><Search size={22} /><strong>No notes found</strong><span>Try another search or folder.</span></div>}</div></section>
 
-          <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${statusSaved ? "is-saved" : ""}`}><span /> {statusError || (activeNoteSavePending ? "Saving…" : "Saved")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder">{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>3</span></div>{["AI-native operating rhythm", "Build once, reuse everywhere", "Quantum Initium · 2026 direction"].map((note) => <button key={note}><File size={15} />{note}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article>
+          {activeNote ? <article className="editor-panel"><div className="editor-toolbar"><div className={`status-pill ${statusSaved ? "is-saved" : ""}`}><span /> {statusError || (activeNoteSavePending ? "Saving…" : "Saved")}</div><div className="editor-actions"><button className={`icon-button ${activeNote.favorite ? "is-active" : ""}`} onClick={() => void updateNote({ favorite: !activeNote.favorite })} aria-label={activeNote.favorite ? "Remove from favorites" : "Add to favorites"}><Star size={17} fill={activeNote.favorite ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => fileInputRef.current?.click()} aria-label="Add attachment"><Paperclip size={17} /></button><button className="icon-button" aria-label="Link note"><Link2 size={17} /></button><button className="icon-button note-delete" onClick={() => void deleteNote(activeNote.id)} aria-label={`Delete ${activeNote.title}`} title={`Delete ${activeNote.title}`}><Trash2 size={17} /></button></div></div><div className="editor-content"><div className="editor-kicker"><span className={`note-dot ${folderMap.get(activeNote.folderId)?.color || "violet"}`} /> <select className="note-folder-select" value={activeNote.folderId} onChange={(event) => void updateNote({ folderId: event.target.value })} aria-label="Move note to folder"><option value="">No folder</option>{[...folders].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> <span>·</span> {activeNote.updated}</div><input className="title-input" value={activeNote.title} onChange={(event) => void updateNote({ title: event.target.value })} aria-label="Note title" /><div className="editor-tags">{activeNote.tags.map((tag) => <button key={tag} type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`}><Hash size={13} />{tag}<X size={11} /></button>)}<input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} placeholder="Add tag" aria-label="Add tag" /></div><textarea className="note-editor" value={activeNote.body} onChange={(event) => void updateNote({ body: event.target.value })} placeholder="Start writing your note..." aria-label="Note content" />{!!activeNote.attachments.length && <div className="attachments"><div className="section-title"><Paperclip size={15} /> Attachments <span>{activeNote.attachments.length}</span></div>{activeNote.attachments.map((attachment) => <div className="attachment-row" key={attachment.id}><button className="attachment-open" onClick={() => void openAttachment(attachment)}><File size={15} /><span>{attachment.name}<small>{attachment.size}</small></span></button><button aria-label={`Remove ${attachment.name}`} onClick={() => void removeAttachment(attachment)}><X size={14} /></button></div>)}</div>}<div className="linked-section"><div className="section-title"><Link2 size={15} /> Linked notes <span>{notes.filter((item) => item.id !== activeNote.id && item.folderId === activeNote.folderId).length}</span></div>{notes.filter((item) => item.id !== activeNote.id && item.folderId === activeNote.folderId).slice(0, 3).map((note) => <button key={note.id} onClick={() => setActiveNoteId(note.id)}><File size={15} />{note.title}<ChevronRight size={14} /></button>)}</div></div><footer className="editor-footer"><span>Markdown</span><span>{activeNote.body.split(/\s+/).filter(Boolean).length} words</span><span>Private</span></footer><input ref={fileInputRef} className="visually-hidden" type="file" multiple onChange={addAttachments} /></article> : <article className="editor-panel"><div className="empty-state"><File size={22} /><strong>No note selected</strong><span>Create a note or pick one from the list.</span><button className="new-note-button" onClick={() => void createNote()}><Plus size={15} /> New note</button></div></article>}
         </div>}
       </section>
       {commandPaletteOpen && <CommandPalette onClose={() => setCommandPaletteOpen(false)} onNewNote={() => { setCommandPaletteOpen(false); void createNote(); }} onNewFolder={() => { setCommandPaletteOpen(false); createFolder(); }} onAllNotes={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("all"); setWorkspaceView("notes"); }} onFavorites={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("favorites"); setWorkspaceView("notes"); }} onRecent={() => { setCommandPaletteOpen(false); setActiveFolderId(null); setTagFilter(null); setNoteFilter("recent"); setWorkspaceView("notes"); }} onGraph={() => { setCommandPaletteOpen(false); setWorkspaceView("graph"); }} onToggleTheme={() => { setCommandPaletteOpen(false); setTheme(theme === "light" ? "dark" : "light"); }} />}
-      {folderModalOpen && <FolderModal name={folderNameDraft} parentId={folderParentDraft} folders={folders} onNameChange={setFolderNameDraft} onParentChange={setFolderParentDraft} onClose={() => setFolderModalOpen(false)} onSubmit={(name, parentId) => void saveNewFolder(name, parentId)} />}
+      {folderModalOpen && <FolderModal name={folderNameDraft} parentId={folderParentDraft} folders={folders} error={folderFormError} onNameChange={setFolderNameDraft} onParentChange={setFolderParentDraft} onClose={() => setFolderModalOpen(false)} onSubmit={(name, parentId) => void saveNewFolder(name, parentId)} />}
       {showAuth && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setShowAuth(false)} onSubmit={handleEmailAuth} onGoogle={handleGoogleAuth} />}
     </main>
   );
 }
 
-function FolderTree({ folder, folders, activeFolderId, expanded, dropTarget, onToggle, onSelect, onShift, onDragStart, onDragOver, onDrop }: { folder: FolderItem; folders: FolderItem[]; activeFolderId: string | null; expanded: Record<string, boolean>; dropTarget: { id: string; mode: "before" | "inside" | "after" } | null; onToggle: (id: string) => void; onSelect: (id: string) => void; onShift: (id: string, delta: number) => void; onDragStart: (id: string) => void; onDragOver: (event: React.DragEvent<HTMLDivElement>, id: string) => void; onDrop: (event: React.DragEvent<HTMLDivElement>, id: string) => void }) {
+function FolderTree({ folder, folders, activeFolderId, expanded, dropTarget, editMode, onToggle, onSelect, onShift, onDragStart, onDragOver, onDrop, onDelete }: { folder: FolderItem; folders: FolderItem[]; activeFolderId: string | null; expanded: Record<string, boolean>; dropTarget: { id: string; mode: "before" | "inside" | "after" } | null; editMode: boolean; onToggle: (id: string) => void; onSelect: (id: string) => void; onShift: (id: string, delta: number) => void; onDragStart: (id: string) => void; onDragOver: (event: React.DragEvent<HTMLDivElement>, id: string) => void; onDrop: (event: React.DragEvent<HTMLDivElement>, id: string) => void; onDelete: (id: string) => void }) {
   const children = folders.filter((item) => item.parentId === folder.id).sort((a, b) => a.position - b.position);
   const siblings = folders.filter((item) => item.parentId === folder.parentId).sort((a, b) => a.position - b.position);
   const siblingIndex = siblings.findIndex((item) => item.id === folder.id);
   const dropMode = dropTarget?.id === folder.id ? dropTarget.mode : "";
-  return <div className="folder-tree"><div className={`folder-drop-row ${dropMode ? `drop-${dropMode}` : ""}`} draggable onDragStart={() => onDragStart(folder.id)} onDragOver={(event) => onDragOver(event, folder.id)} onDrop={(event) => void onDrop(event, folder.id)}><div className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`}><div className="folder-main">{children.length ? <button type="button" className="tree-toggle" onClick={() => onToggle(folder.id)} aria-label={`${expanded[folder.id] ? "Collapse" : "Expand"} ${folder.name}`} aria-expanded={expanded[folder.id]}>{expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-spacer" aria-hidden="true" />}<button type="button" className="folder-select" onClick={() => onSelect(folder.id)} title={folder.name}><span><Folder size={16} />{folder.name}</span></button></div><span className="folder-row-actions"><button type="button" className="folder-move-button" disabled={siblingIndex <= 0} onClick={() => void onShift(folder.id, -1)} aria-label={`Move ${folder.name} up`} title={siblingIndex <= 0 ? "Already first" : `Move ${folder.name} up`}><ChevronUp size={13} /></button><button type="button" className="folder-move-button" disabled={siblingIndex === siblings.length - 1} onClick={() => void onShift(folder.id, 1)} aria-label={`Move ${folder.name} down`} title={siblingIndex === siblings.length - 1 ? "Already last" : `Move ${folder.name} down`}><ChevronDown size={13} /></button><span className="folder-drag-handle" title={`Drag ${folder.name} to reorder`} aria-label={`Drag ${folder.name} to reorder`}><GripVertical size={15} aria-hidden="true" /></span></span></div></div>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={onToggle} onSelect={onSelect} onShift={onShift} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} /></div>)}</div>;
+  return <div className="folder-tree"><div className={`folder-drop-row ${dropMode ? `drop-${dropMode}` : ""}`} draggable onDragStart={() => onDragStart(folder.id)} onDragOver={(event) => onDragOver(event, folder.id)} onDrop={(event) => void onDrop(event, folder.id)}><div className={`nav-item folder-item ${activeFolderId === folder.id ? "active" : ""}`}><div className="folder-main">{children.length ? <button type="button" className="tree-toggle" onClick={() => onToggle(folder.id)} aria-label={`${expanded[folder.id] ? "Collapse" : "Expand"} ${folder.name}`} aria-expanded={expanded[folder.id]}>{expanded[folder.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-spacer" aria-hidden="true" />}<button type="button" className="folder-select" onClick={() => onSelect(folder.id)} title={folder.name}><span><Folder size={16} />{folder.name}</span></button></div><span className="folder-row-actions"><button type="button" className="folder-move-button" disabled={siblingIndex <= 0} onClick={() => void onShift(folder.id, -1)} aria-label={`Move ${folder.name} up`} title={siblingIndex <= 0 ? "Already first" : `Move ${folder.name} up`}><ChevronUp size={13} /></button><button type="button" className="folder-move-button" disabled={siblingIndex === siblings.length - 1} onClick={() => void onShift(folder.id, 1)} aria-label={`Move ${folder.name} down`} title={siblingIndex === siblings.length - 1 ? "Already last" : `Move ${folder.name} down`}><ChevronDown size={13} /></button><span className="folder-drag-handle" title={`Drag ${folder.name} to reorder`} aria-label={`Drag ${folder.name} to reorder`}><GripVertical size={15} aria-hidden="true" /></span>{editMode && <button type="button" className="folder-move-button folder-delete-button" onClick={() => onDelete(folder.id)} aria-label={`Delete ${folder.name}`} title={`Delete ${folder.name}`}><Trash2 size={13} /></button>}</span></div></div>{expanded[folder.id] && children.map((child) => <div className="nested-folder" key={child.id}><FolderTree folder={child} folders={folders} activeFolderId={activeFolderId} expanded={expanded} dropTarget={dropTarget} onToggle={onToggle} onSelect={onSelect} onShift={onShift} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDelete={onDelete} editMode={editMode} /></div>)}</div>;
 }
 
 function AuthModal({ mode, setMode, onClose, onSubmit, onGoogle, error, locked = false }: { mode: "login" | "register"; setMode: (mode: "login" | "register") => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>, email: string, password: string) => void; onGoogle: () => void; error?: string; locked?: boolean }) {
@@ -1251,14 +1336,14 @@ function NavItem({ icon, label, count, active, onClick }: { icon: React.ReactNod
   return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}><span>{icon}{label}</span>{count && <small>{count}</small>}</button>;
 }
 
-function FolderModal({ name, parentId, folders, onNameChange, onParentChange, onClose, onSubmit }: { name: string; parentId: string | null; folders: FolderItem[]; onNameChange: (name: string) => void; onParentChange: (parentId: string | null) => void; onClose: () => void; onSubmit: (name: string, parentId: string | null) => void }) {
+function FolderModal({ name, parentId, folders, error, onNameChange, onParentChange, onClose, onSubmit }: { name: string; parentId: string | null; folders: FolderItem[]; error?: string; onNameChange: (name: string) => void; onParentChange: (parentId: string | null) => void; onClose: () => void; onSubmit: (name: string, parentId: string | null) => void }) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = name.trim();
     if (trimmedName) onSubmit(trimmedName, parentId);
   };
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="folder-modal" role="dialog" aria-modal="true" aria-labelledby="folder-modal-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><X size={17} /></button><div className="auth-icon"><FolderPlus size={19} /></div><p className="eyebrow">Organize your vault</p><h2 id="folder-modal-title">New folder</h2><p className="auth-copy">Create a folder at the root or inside another folder. It will be saved immediately.</p><form className="folder-form" onSubmit={handleSubmit}><label>Folder name<input autoFocus value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Client research" required /></label><label>Location<select value={parentId || ""} onChange={(event) => onParentChange(event.target.value || null)}><option value="">Root folders</option>{folders.slice().sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><div className="folder-form-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancel</button><button type="submit" className="new-note-button">Create folder</button></div></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="folder-modal" role="dialog" aria-modal="true" aria-labelledby="folder-modal-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close"><X size={17} /></button><div className="auth-icon"><FolderPlus size={19} /></div><p className="eyebrow">Organize your vault</p><h2 id="folder-modal-title">New folder</h2><p className="auth-copy">Create a folder at the root or inside another folder. It will be saved immediately.</p>{error && <p className="auth-error" role="alert">{error}</p>}<form className="folder-form" onSubmit={handleSubmit}><label>Folder name<input autoFocus value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="e.g. Client research" required /></label><label>Location<select value={parentId || ""} onChange={(event) => onParentChange(event.target.value || null)}><option value="">Root folders</option>{folders.slice().sort((a, b) => a.name.localeCompare(b.name)).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><div className="folder-form-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancel</button><button type="submit" className="new-note-button">Create folder</button></div></form></section></div>;
 }
 
 function CommandPalette({ onClose, onNewNote, onNewFolder, onAllNotes, onFavorites, onRecent, onGraph, onToggleTheme }: { onClose: () => void; onNewNote: () => void; onNewFolder: () => void; onAllNotes: () => void; onFavorites: () => void; onRecent: () => void; onGraph: () => void; onToggleTheme: () => void }) {

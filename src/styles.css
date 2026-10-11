@@ -89,3 +89,11 @@ button { border: 0; cursor: pointer; }
 .command-action kbd, .command-hint { color: var(--muted); font: 10px "DM Mono", monospace; }
 .command-hint { padding: 10px 10px 0; margin: 0; }
 .folder-modal { position: relative; width: min(410px, 100%); padding: 35px; color: var(--text); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.2); }.folder-modal h2 { margin: 0; font: 600 31px "Playfair Display", serif; letter-spacing: -.04em; }.folder-form { display: grid; gap: 14px; margin-top: 22px; }.folder-form label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }.folder-form input, .folder-form select { width: 100%; padding: 10px 11px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; outline: 0; font-size: 12px; }.folder-form input:focus, .folder-form select:focus { border-color: var(--accent); }.folder-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 7px; }.modal-secondary { padding: 9px 12px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; }.modal-secondary:hover { color: var(--text); background: var(--soft); }
+.nav-label-buttons { display: flex; align-items: center; gap: 2px; }
+.nav-add-button.is-active { color: var(--accent); background: var(--accent-soft); }
+.note-card-row { position: relative; }
+.note-card-row .note-card { width: 100%; }
+.note-delete-button { position: absolute; top: 10px; right: 10px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; color: var(--muted); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 7px; cursor: pointer; }
+.note-delete-button:hover { color: #d95f5f; border-color: #d95f5f; background: var(--soft); }
+.folder-delete-button { color: #d95f5f !important; }
+.icon-button.note-delete:hover { color: #d95f5f; }
