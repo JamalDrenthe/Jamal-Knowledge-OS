@@ -5,7 +5,7 @@
 [![Vite](https://img.shields.io/badge/Vite-6.0-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_%2B_RLS_%2B_PKCE-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
 [![Firebase Ready](https://img.shields.io/badge/Firebase-Firestore_%26_Storage_Migration_Suite-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com/)
-[![Live Vault](https://img.shields.io/badge/Live-jamal--knowledge--os.vercel.app-6366F1?logo=vercel&logoColor=white)](https://jamal-knowledge-os.vercel.app)
+[![Cloudflare Pages](https://img.shields.io/badge/Live-knowledge.jamaldrenthe.com-F38020?logo=cloudflare&logoColor=white)](https://knowledge.jamaldrenthe.com)
 
 > **Executive Summary (NL):** **Jamal Knowledge OS** is een privé, cloud-gesynchroniseerd Knowledge Operating System ("Second Brain") dat de minimalistische rust van Apple Notes combineert met de relationele kracht van Obsidian. Het platform biedt een geneste mappenboom voor 25+ holding-entiteiten, bidirectionele notitielinks, een interactieve **Knowledge Graph**, versleutelde privé-bijlagen, idempotente blueprint-synchronisatie (`import_key`) en zero-trust toegangscontrole op basis van PostgreSQL Row-Level Security (RLS) én een kant-en-klare Firebase migratiesuite.
 >
@@ -92,7 +92,7 @@ De database-evolutie is volledig vastgelegd in [`supabase/migrations/`](supabase
 | **Frontend** | React 19.0, TypeScript 5.7, Vite 6.0, Lucide React Icons, Custom CSS Design System (`src/styles.css`) |
 | **Primaire Backend** | Supabase (`@supabase/supabase-js` v2.117), PostgreSQL 15+, Row-Level Security (RLS), Supabase Storage |
 | **Secundaire Cloud / Migratie** | Firebase Firestore (`firebase/firestore.rules`), Firebase Storage (`firebase/storage.rules`), Node.js ESM Migratie CLI |
-| **Hosting & Beveiliging** | Vercel met aangepaste CSP-headers en zelfstandige merkeigen 404-afhandeling |
+| **Hosting & Beveiliging** | Cloudflare Pages (`knowledge.jamaldrenthe.com`) met aangepaste CSP-headers en zelfstandige merkeigen 404-afhandeling |
 
 ---
 
@@ -134,4 +134,4 @@ Ben je **recruiter**, **engineering lead** of **ondernemer** en op zoek naar een
 
 - **GitHub**: [@JamalDrenthe](https://github.com/JamalDrenthe)
 - **E-mail**: [info@jamaldrenthe.com](mailto:info@jamaldrenthe.com)
-- **Live Applicatie**: [jamal-knowledge-os.vercel.app](https://jamal-knowledge-os.vercel.app)
+- **Live Applicatie**: [knowledge.jamaldrenthe.com](https://knowledge.jamaldrenthe.com)

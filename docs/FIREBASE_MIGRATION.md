@@ -57,12 +57,12 @@ users/{uid}/attachments/{attId}      # { noteId, storagePath, fileName, mimeType
 1. Firebase-project aanmaken/kiezen (console of `firebase init`), Firestore + Storage + Auth aanzetten, Google-provider en eigenaar-account activeren.
 2. Eenmalig inloggen in de app op Firebase om de `firebase_uid` te verkrijgen; invullen in `scripts/migration-config.json` naast de Supabase `user_id`.
 3. `firebase deploy --only firestore:rules,firestore:indexes,storage` op het nieuwe project.
-4. Env vars in Vercel toevoegen: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_APP_ID` (en service-account JSON als `FIREBASE_SERVICE_ACCOUNT` voor het script — nooit committen).
+4. Env vars in Cloudflare Pages toevoegen: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_APP_ID` (en service-account JSON als `FIREBASE_SERVICE_ACCOUNT` voor het script — nooit committen).
 5. `node scripts/migrate-supabase-to-firebase.mjs --dry-run` → rapportage controleren.
 6. `node scripts/migrate-supabase-to-firebase.mjs --write` → mappen, notities, attachment-metadata + bestanden kopiëren.
 7. App-code: `src/lib/supabase.ts` vervangen door `src/lib/firebase.ts` (adapter met dezelfde interface); stapsgewijs per feature uitschakelen achter `VITE_BACKEND=firebase|supabase` flag.
 8. Verificatie: aantallen vergelijken (folders/notes/attachments), inloggen, refresh-persistentie, bijlage download.
-9. Cutover: Supabase env vars verwijderen uit Vercel; Supabase-tabellen 30 dagen bewaren als backup, dan exporteren naar Markdown/JSON.
+9. Cutover: Supabase env vars verwijderen uit Cloudflare Pages; Supabase-tabellen 30 dagen bewaren als backup, dan exporteren naar Markdown/JSON.
 
 ## 5. Code-impact (voorbereid, niet uitgevoerd)
 
