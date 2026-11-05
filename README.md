@@ -7,15 +7,11 @@
 [![Firebase Ready](https://img.shields.io/badge/Firebase-Firestore_%26_Storage_Migration_Suite-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com/)
 [![Cloudflare Pages](https://img.shields.io/badge/Live-knowledge.jamaldrenthe.com-F38020?logo=cloudflare&logoColor=white)](https://knowledge.jamaldrenthe.com)
 
-> **Executive Summary (NL):** **Jamal Knowledge OS** is een privé, cloud-gesynchroniseerd Knowledge Operating System ("Second Brain") dat de minimalistische rust van Apple Notes combineert met de relationele kracht van Obsidian. Het platform biedt een geneste mappenboom voor 25+ holding-entiteiten, bidirectionele notitielinks, een interactieve **Knowledge Graph**, versleutelde privé-bijlagen, idempotente blueprint-synchronisatie (`import_key`) en zero-trust toegangscontrole op basis van PostgreSQL Row-Level Security (RLS) én een kant-en-klare Firebase migratiesuite.
->
-> **Executive Summary (EN):** **Jamal Knowledge OS** is a private, local-first-feeling cloud workspace for ideas, architectural decisions, and executive context across 25+ portfolio companies. Built with React 19, TypeScript, and Supabase (PostgreSQL + PKCE Auth + RLS + Private Storage), it features an interactive visual **Knowledge Graph**, hierarchical drag-and-drop folders with deterministic `import_key` reconciliation, debounced real-time autosave, and a complete **Supabase-to-Firebase migration pipeline**.
+**Jamal Knowledge OS** (`knowledge.jamaldrenthe.com`) is een privé, cloud-gesynchroniseerd Knowledge Operating System dat een minimalistische notitie-omgeving combineert met relationele graafstructuren. Het platform biedt een geneste mappenboom voor 25+ holding-entiteiten, bidirectionele notitielinks, een interactieve **Knowledge Graph**, versleutelde privé-bijlagen, idempotente blueprint-synchronisatie (`import_key`) en toegangscontrole op basis van PostgreSQL Row-Level Security (RLS) én een Firebase migratiesuite.
 
 ---
 
-## Waarom dit project technisch onderscheidend is (For Technical Recruiters & CTOs)
-
-Veel notitie-apps zijn óf puur lokale prototypes zonder beveiligde cloud-opslag, óf trage wrappers rond zware editors. **Jamal Knowledge OS** toont doordachte software-engineering op vier vlakken:
+## Technische Kernpunten
 
 1. **Idempotente Blueprint Reconciliatie & Self-Healing Mappenboom (`src/App.tsx`, migraties `001`–`005`)**:
    - Bevat een deterministisch `import_key` reconciliatie-algoritme (`inferImportedFolderKey`) dat een hiërarchische blauwdruk van 25+ ondernemingen (*Quantum Initium, CRMos, Djobba, Investbotiq, VVC, WoningVry, Xabi World, CloudiAudi, CyberSec360, Overskilled, Prompt DJ*, etc.) synchroniseert met de cloud-database zonder ooit duplicaten te creëren bij gelijktijdige sessies of schema-upgrades.
@@ -126,12 +122,10 @@ npm run preview   # Serveert de productiebuild lokaal
 
 ---
 
-## Over de Architect & Samenwerking
+## Auteur & Contact
 
-Ontworpen en gebouwd door **Jamal Drenthe** — Full-Stack Software Engineer, Systems Architect & Founder van **Quantum Initium**.
+Ontworpen en ontwikkeld door **Jamal Drenthe** ([Quantum Initium](https://quantuminitium.com)).
 
-Ben je **recruiter**, **engineering lead** of **ondernemer** en op zoek naar een ontwikkelaar die complexe datamodellen, multi-cloud migraties en verfijnde product-interfaces bouwt?
-
+- **Website**: [knowledge.jamaldrenthe.com](https://knowledge.jamaldrenthe.com)
 - **GitHub**: [@JamalDrenthe](https://github.com/JamalDrenthe)
 - **E-mail**: [info@jamaldrenthe.com](mailto:info@jamaldrenthe.com)
-- **Live Applicatie**: [knowledge.jamaldrenthe.com](https://knowledge.jamaldrenthe.com)
